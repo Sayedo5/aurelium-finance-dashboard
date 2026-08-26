@@ -1,286 +1,199 @@
 # Aurelium Ledger
 
-**Every number your business runs on, in one calm place — a 16-module finance platform with a public product site.**
+A business finance dashboard covering receivables, payables, budgeting, forecasting and statutory reporting — with a public product site in front of it.
 
-![Next.js](https://img.shields.io/badge/Next.js-14-000000?style=flat-square&logo=nextdotjs&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-14.2-000000?style=flat-square&logo=nextdotjs&logoColor=white)
+![React](https://img.shields.io/badge/React-18.3-61DAFB?style=flat-square&logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)
-![Recharts](https://img.shields.io/badge/Recharts-2-D99A29?style=flat-square)
-![Routes](https://img.shields.io/badge/routes-25_static-1FA163?style=flat-square)
-![Accessibility](https://img.shields.io/badge/a11y-WCAG_AA-1FA163?style=flat-square)
-![License](https://img.shields.io/badge/license-MIT-64748B?style=flat-square)
+![Recharts](https://img.shields.io/badge/Recharts-2.15-E8B34A?style=flat-square)
+![Vercel](https://img.shields.io/badge/Deployed_on-Vercel-000000?style=flat-square&logo=vercel&logoColor=white)
 
----
+## About
 
-## What it is
+Aurelium Ledger is a finance dashboard for a small-to-mid-size business: one place to see cash position, chase unpaid invoices, schedule vendor bills, track budgets against actual spend, and project cashflow forward. It is aimed at the person who owns the numbers — a finance lead, founder or bookkeeper who would otherwise be reconciling several bank tabs against a spreadsheet.
 
-Aurelium Ledger is a complete business finance product: a **public marketing portal** that
-explains the offering, and a **sixteen-module dashboard** behind it covering receivables,
-payables, planning, statutory reporting and governance.
+The application is a front-end build with no backend. All figures come from a deterministic dataset generated locally at build time, so the interface can be explored end to end without an account or a connected bank.
 
-It is built for the person who owns the numbers — a **finance lead, founder or bookkeeper
-at a small-to-mid-size business** who needs to answer "where did the money go, who owes us,
-what is due, and are we going to be fine?" without opening four bank tabs and a spreadsheet.
+## Live Demo
 
-The interface is deliberately quiet. Gold marks what matters, green and red mean exactly one
-thing each (money in, money out), and nothing animates unless the movement carries information.
+**[aurelium-finance-dashboard.vercel.app](https://aurelium-finance-dashboard.vercel.app/)**
 
-> **Live demo:** _not yet deployed — replace this line with the deployment URL_
+The dashboard opens directly at `/dashboard` — no sign-up required.
+
+## Key Features
+
+**Receivables**
+- Invoices with line items, quantity, unit price and tax rate across five states (draft, sent, paid, overdue, void)
+- A/R ageing report split into current / 1–30 / 31–60 / 61–90 / 90+ day buckets, each clickable to filter the list
+- Days-sales-outstanding calculated from actual issue-to-settlement dates
+- Invoiced-vs-collected chart comparing what was billed each month against what was received
+- Detail drawer with the full line breakdown, subtotal, tax and total
+
+**Payables**
+- Vendor book with bills in draft, scheduled, paid and overdue states
+- Recurring bills flagged and filterable separately from one-off spend
+- Working-capital position stated as receivable minus payable
+
+**Ledger and accounts**
+- Transaction table with debounced search, seven filters (direction, category, account, status, and an inclusive from/to month range), sortable columns and selectable page size
+- Five accounts including a credit line with a utilisation bar against its limit
+- Per-account statement export
+
+**Planning**
+- Category budgets with on-track, near-limit (≥90%) and over-allocation states, reconciled against ledger spend
+- Twelve-month cashflow projection across three scenarios, with sliders for revenue growth, expense growth and planned monthly cost; runway and break-even month are derived from the inputs
+- Profit & loss, balance sheet and indirect cashflow statement, each with a period comparison and variance column
+- Tax centre with quarterly estimates, amounts paid, outstanding shortfall and a set-aside calculator
+- Savings goals with funding progress and months-remaining calculation
+- Calendar built from the actual bill, invoice, payroll and tax-deadline records rather than a separate event list
+
+**Workspace**
+- Five roles across ten permissions, rendered as a live matrix that updates when a member's role changes
+- Members can be invited, suspended and restored
+- Audit log of 80 events filterable by actor, action, area and severity
+
+**Application-wide**
+- Command-palette search (`⌘K` / `Ctrl+K`) across invoices, clients, vendors, bills, transactions and accounts, with keyboard navigation and deep links into the relevant module
+- CSV export on thirteen screens, generated in the browser to RFC 4180 and reporting failure honestly if the browser blocks the download
+- Light and dark themes, applied before first paint so a reload never flashes the wrong palette
+- Display currency, date format and row density preferences that propagate app-wide and persist to `localStorage`
+- Error boundaries around every chart, plus route-level and global fallbacks
+- Responsive from 390px up: tables become stacked cards below `md`, and the sidebar becomes a focus-managed drawer below `lg`
+- Accessibility: skip link, focus traps in dialogs and drawers, `aria-sort` on sortable columns, WCAG AA contrast in both themes, and `prefers-reduced-motion` support
 
 ## Screenshots
 
 ### Desktop
 
-![desktop](./screenshots/desktop.png)
+Dashboard — cash position, receivables and payables, and items needing attention
+
+![desktop](./screenshots/desktop/1.jpg)
+
+Invoices — invoiced vs. collected, and the A/R ageing report
+
+![desktop](./screenshots/desktop/2.jpg)
+
+Forecast — actual balance against a twelve-month projection, with tunable assumptions
+
+![desktop](./screenshots/desktop/3.jpg)
+
+Transactions — the sortable, filterable ledger
+
+![desktop](./screenshots/desktop/4.jpg)
+
+Reports — profit & loss with period comparison and variance
+
+![desktop](./screenshots/desktop/5.jpg)
+
+Team & Roles — members, role assignment and the permission matrix
+
+![desktop](./screenshots/desktop/6.jpg)
 
 ### Tablet
 
-![tablet](./screenshots/tablet.png)
+![tablet](./screenshots/tablet/1.jpg)
+
+![tablet](./screenshots/tablet/2.jpg)
 
 ### Mobile
 
-![mobile](./screenshots/mobile.png)
+![mobile](./screenshots/mobile/1.jpg)
 
----
+![mobile](./screenshots/mobile/2.jpg)
 
-## Site map
+## Tech Stack
 
-**Public portal**
+**Frontend**
+- Next.js 14.2 (App Router)
+- React 18.3
+- TypeScript 5.9 (`strict`)
 
-| Route | What it is |
-| --- | --- |
-| `/` | Landing — hero with a live data preview, module grid, proof stats, design principles |
-| `/features` | Full breakdown of every module, grouped by job, plus the engineering underneath |
-| `/pricing` | Three tiers, a working monthly/annual toggle, a line-by-line comparison table, FAQ |
-| `/about` | What it is, who it is for, the principles, the story, the workspace team, the stack |
-| `/contact` | Validated contact form with a real submitted state |
-| `/login` | Demonstration sign-in flow into the dashboard |
+**Styling**
+- Tailwind CSS 3.4 with CSS-variable theme tokens
+- `clsx` + `tailwind-merge` for class composition
+- Inter, self-hosted via `next/font`
 
-**Dashboard** — grouped in the sidebar by what you are trying to do
+**Data Visualisation**
+- Recharts 2.15
+- `lucide-react` for iconography
 
-| Group | Routes |
-| --- | --- |
-| Overview | `/dashboard` · `/dashboard/analytics` · `/dashboard/calendar` |
-| Money in | `/dashboard/invoices` · `/dashboard/clients` |
-| Money out | `/dashboard/bills` · `/dashboard/transactions` · `/dashboard/accounts` |
-| Planning | `/dashboard/budgets` · `/dashboard/goals` · `/dashboard/forecast` · `/dashboard/reports` · `/dashboard/tax` |
-| Workspace | `/dashboard/team` · `/dashboard/audit` · `/dashboard/settings` |
+**State Management**
+- React Context for theme, display preferences, notifications and toasts
+- Local component state elsewhere — no external state library
 
----
+**Backend / API**
+- None. No server, no database, no external services. Data is generated locally in `lib/data/` and the only browser APIs used are `localStorage` for preferences and `Blob` / `createObjectURL` for CSV export.
 
-## Key features
+**Tooling**
+- ESLint 8 with `eslint-config-next`
+- PostCSS + Autoprefixer
+- Deployed on Vercel
 
-### Money in
+## Getting Started
 
-**Invoices** — Line-item invoices with quantity, unit price and tax rate across five states
-(draft, sent, paid, overdue, void). A full **A/R ageing report** splits receivables into
-current / 1–30 / 31–60 / 61–90 / 90+ day buckets, each clickable to filter the list.
-Days-sales-outstanding is computed from real settlement dates. A detail drawer shows the
-line breakdown, subtotal, tax and total, and exports just those lines.
-
-**Clients** — Forty accounts with contacts, industry, country, net terms and an assigned
-account manager. Lifetime billings and outstanding balance per client, ranked. Filter by
-status, industry and owner. The client drawer lists every invoice ever raised against them.
-
-### Money out
-
-**Bills & vendors** — A forty-supplier vendor book mapped to spend categories, with draft,
-scheduled, paid and overdue bills. Recurring bills are flagged and separable. The
-**working-capital position** (receivable minus payable) sits at the top.
-
-**Transaction ledger** — ~640 transactions across twelve months and five accounts.
-Debounced search, seven filters including an inclusive from/to month range, sortable
-columns, selectable page size, and a CSV export of exactly what is on screen.
-
-**Accounts** — Operating checking, payroll clearing, tax reserve, growth savings and a
-credit line with a utilisation bar. Selecting an account drives its statement, monthly
-inflow/outflow and per-account CSV export.
-
-### Planning
-
-**Budgets** — Ten category budgets with on-track, **near-limit (≥90%)** and over states.
-Create or edit through a validated modal with a real category picker.
-
-**Forecast** — Twelve months projected from the trailing three-month average across three
-scenarios, with **live sliders** for revenue growth, expense growth and planned monthly
-cost. Runway and break-even month are stated, and the projection is dashed so actuals and
-model never blur together.
-
-**Reports** — Profit & loss (with a cost-of-revenue split), balance sheet, and an indirect
-cashflow statement. Every statement has a period comparison, a variance column and CSV export.
-
-**Tax centre** — Five quarterly periods with filed / due / upcoming states, estimated
-liability against amount paid, the shortfall, and a **working set-aside calculator**.
-
-**Savings goals** — Reserve targets with animated funding rings, months-remaining maths and
-contributions that apply immediately and cap at the target.
-
-**Calendar** — A Monday-first month grid built from the *real* bills, invoices, payroll runs
-and tax deadlines, so it can never disagree with the payables and receivables pages. Filter
-by kind, click any day for its detail.
-
-### Governance
-
-**Team & roles** — Five roles across ten granular permissions, rendered as a **live matrix**.
-Change someone's role and the matrix updates immediately. Invite, suspend and restore access.
-
-**Audit log** — Eighty events over three weeks, filterable by actor, action, area and
-severity, with critical actions called out. Actor, timestamp and source IP on every entry.
-
-### Throughout
-
-- **Global search** (`⌘K` / `Ctrl+K`) across invoices, clients, vendors, bills, transactions
-  and accounts — keyboard-navigable, deep-linking into the right module with the query applied.
-- **Real CSV export** on ten screens. Each builds an RFC 4180 file in the browser; if the
-  browser blocks the download the app says so rather than claiming a success that never happened.
-- **Light and dark**, applied before first paint so a reload never flashes the wrong palette.
-- **Working preferences** — display currency, date format and row density propagate to every
-  page and persist to `localStorage`.
-- **Shimmering skeletons** on first paint, and a Refresh action that replays them on demand.
-- **Error boundaries** around every chart, plus route-level and global fallbacks.
-- **Accessible** — skip link, focus traps in dialogs and drawers, `aria-sort` on sortable
-  columns, visible focus rings, WCAG AA contrast in both themes, reduced-motion support.
-- **No dead clicks.** Every button, tab, filter, slider and dropdown produces visible behaviour.
-
----
-
-## Tech stack
-
-| Layer | Choice |
-| --- | --- |
-| Framework | Next.js 14 (App Router, all 25 routes statically prerendered) |
-| Language | TypeScript 5, `strict` |
-| Styling | Tailwind CSS 3.4 with CSS-variable theme tokens |
-| Charts | Recharts 2 (six memoised wrappers) |
-| Icons | lucide-react |
-| Fonts | Inter via `next/font` (self-hosted, four weights) |
-| Utilities | clsx + tailwind-merge |
-| Data | Local deterministic dataset — no backend |
-
-Seven runtime dependencies. No state library, no component library, **no image assets** —
-the entire UI is CSS and SVG.
-
-## Design system
-
-Declared once in `tailwind.config.ts` and `app/globals.css`, used everywhere:
-
-- **Colour** — Aurelium means *aurum*, gold. One gold accent (`aurum-400`, `#e8b34a`) over a
-  deep charcoal-navy canvas (`#070a10`) or a soft neutral light one (`#f5f6f9`). Green and red
-  are reserved exclusively for gains and losses, never for UI chrome, so a colour in this app
-  always means money.
-- **Radius** — three tokens: `control` (10px) for inputs and buttons, `card` (16px) for panels,
-  `pill` for chips.
-- **Depth** — a four-step shadow ladder (`raised` → `card` → `lift` → `overlay`) paired with a
-  1px border. Never a heavy border and a heavy shadow together.
-- **Type** — Inter with tabular figures enabled globally, so every column of numbers aligns.
-  Labels are small, tracked-out and uppercase; metrics are large and tight.
-
-`tailwind-merge` is extended with the custom radius, shadow and font-size scales — otherwise
-it treats `text-metric` as a colour and silently drops it next to `text-gain-600`.
-
-## Data
-
-All data is local and deterministic — there is no backend. It is generated in `lib/data/*`
-from handwritten seeds via an FNV-1a hash, so **no `Math.random()` and no `Date.now()`**:
-server and client render byte-identical output, hydration never mismatches, and figures never
-drift between reloads. The whole dataset is anchored to a fixed reporting date (31 July 2026)
-so overdue counts and ageing buckets stay stable.
-
-| | Count |
-| --- | --- |
-| Transactions | ~640 across 12 months, 5 accounts, 16 categories |
-| Invoices | 60 with line items, tax and payment history |
-| Clients | 40 with contacts, terms and owners |
-| Bills / vendors | 40 / 40 |
-| Team members | 8 across 5 roles and 10 permissions |
-| Audit events | 80 |
-
-Figures cross-check between modules: the clients page's total outstanding equals the invoices
-page's total receivable; lifetime billings equals invoiced-all-time; the overview's cash
-balance equals the accounts page and the forecast's starting cash.
-
-## Getting started
-
-**Requirements:** Node.js 18.17 or newer.
+Requires **Node.js 18.17** or newer.
 
 ```bash
 git clone https://github.com/<your-username>/aurelium-finance-dashboard.git
 cd aurelium-finance-dashboard
 npm install
-npm run dev          # http://localhost:3000
+npm run dev
 ```
 
-Production build:
+The development server runs at `http://localhost:3000`.
+
+**Production build:**
 
 ```bash
 npm run build
 npm start
 ```
 
-Other scripts:
+**Other scripts:**
 
 ```bash
-npm run lint         # next lint
-npx tsc --noEmit     # type-check without emitting
+npm run lint       # ESLint via next lint
+npx tsc --noEmit   # Type-check without emitting
 ```
 
-## Project structure
+## Project Structure
 
 ```
 app/
-  layout.tsx              root layout, theme bootstrap, skip link
-  error.tsx               route-level error fallback
-  global-error.tsx        last-resort fallback (no providers, inline styles)
-  not-found.tsx           404
-  globals.css             theme tokens, component layer, utilities
-  (marketing)/            public portal — /, /about, /features, /pricing, /contact
-  login/                  demonstration sign-in
-  dashboard/              16 module routes
+  (marketing)/        Public site — landing, features, pricing, about, contact
+  login/              Demonstration sign-in flow
+  dashboard/          16 module routes
+  error.tsx           Route-level error boundary
+  global-error.tsx    Root fallback
+  globals.css         Theme tokens and component layer
+
 components/
-  charts/                 memoised Recharts wrappers, themed tooltips
-  layout/                 dashboard shell
-  marketing/              header, footer, sections, app preview, pricing, contact, login
-  navigation/             sidebar, topbar, logo, theme toggle, global search
-  pages/                  one client component per dashboard module
-  providers/              theme, preferences, notifications, toasts, refresh
-  ui/                     button, card, field, badge, modal, drawer, data-table,
-                          progress, skeleton, stat-card, states, toast
+  charts/             Memoised Recharts wrappers with themed tooltips
+  layout/             Dashboard shell
+  marketing/          Public-site header, footer, sections, pricing, contact
+  navigation/         Sidebar, topbar, global search, theme toggle
+  pages/              One client component per dashboard module
+  providers/          Theme, preferences, notifications, toasts
+  ui/                 Button, card, field, badge, modal, drawer, data-table,
+                      progress, skeleton, stat-card, states, toast
+
 lib/
-  data/                   seed, core, team, clients, ledger, invoices, bills,
-                          planning, governance, navigation
-  mock-data.ts            barrel re-export of the whole dataset
-  selectors.ts            derived totals, ageing, reports, forecasting, search
-  hooks.ts                useCountUp, useSimulatedLoading, useDebouncedValue,
-                          useDismissable, useMounted
-  csv.ts                  RFC 4180 CSV builder and browser download
-  types.ts                shared domain types
-  utils.ts                currency, date and percentage formatting
+  data/               Domain modules and the deterministic seed generator
+  selectors.ts        Derived totals, ageing, reports, forecasting, search
+  hooks.ts            Count-up, loading, debounce, dismiss handlers
+  csv.ts              CSV builder and browser download
+  types.ts            Shared domain types
+  utils.ts            Currency, date and percentage formatting
 ```
 
-## Responsive behaviour
+## A Note on the Data
 
-| Breakpoint | Layout |
-| --- | --- |
-| `< 480px` | Single column. Sidebar becomes an overlay drawer behind a hamburger, with focus management and scroll lock. **Every table renders as stacked cards** rather than a sideways scroll. Search moves below the page title. |
-| `~768px` | Two-column KPI and card grids; charts go full width; tables appear with low-priority columns hidden. |
-| `1024px+` | Persistent grouped sidebar; multi-column dashboard. |
-| `1280px+` | Asymmetric content grids; search returns to the topbar; remaining table columns reveal. |
+There is no client or production data in this repository. The dataset — roughly 640 transactions, 60 invoices, 40 clients, 40 bills and 40 vendors — is generated at build time from handwritten seeds using a hash function, with no `Math.random()` and no `Date.now()`. Server and client therefore render identical output, and the figures stay stable between reloads and deployments.
 
 ## Author
 
-**Sayed Muhammad** — React / Frontend Developer
+**Sayed Muhammad** — React / React Native / Frontend Developer
 
-- Email: [waleed.farrukh@gmail.com](mailto:waleed.farrukh@gmail.com)
-- LinkedIn: [linkedin.com/in/sayed-muhammad](https://www.linkedin.com/in/sayed-muhammad)
-
-> Update the LinkedIn URL above to your actual profile slug.
-
-## Related project
-
-This is the small/mid-business build. See **enterprise-finance-dashboard** for the larger
-enterprise reporting version with multi-department views, approval workflows and role-based
-navigation.
-
-## License
-
-MIT
+- Email: [sayedmuhammad.dev@gmail.com](mailto:sayedmuhammad.dev@gmail.com)
+- LinkedIn: [linkedin.com/in/syed-muhammad-66b493179](https://www.linkedin.com/in/syed-muhammad-66b493179)
