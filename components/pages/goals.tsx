@@ -2,32 +2,41 @@
 
 import { useMemo, useState } from "react";
 import { CalendarClock, Plus, Target, TrendingUp } from "lucide-react";
-import { Card } from "@/components/ui/card";
+import { Card, CardHeader } from "@/components/ui/card";
 import { Progress, RingProgress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatCard } from "@/components/ui/stat-card";
 import { Modal } from "@/components/ui/modal";
-import { useAppContext } from "@/components/providers/app-provider";
+import { Button } from "@/components/ui/button";
+import { Field, Input } from "@/components/ui/field";
+import { useAppContext, useFormat } from "@/components/providers/app-provider";
 import { useSimulatedLoading } from "@/lib/hooks";
 import { accountMap, savingsGoals as seedGoals } from "@/lib/mock-data";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { cn, ratioToPercent } from "@/lib/utils";
+import type { SavingsGoal } from "@/lib/types";
 
 /** Months of contributions still needed to close the gap. */
 function monthsRemaining(target: number, saved: number, monthly: number) {
+  if (saved >= target) return 0;
   if (monthly <= 0) return Infinity;
-  return Math.max(0, Math.ceil((target - saved) / monthly));
+  return Math.ceil((target - saved) / monthly);
 }
 
+const presets = [2500, 5000, 10000];
+
 export function GoalsPage() {
-  const loading = useSimulatedLoading();
-  const { addToast } = useAppContext();
-  const [goals, setGoals] = useState(seedGoals);
+  const { addToast, refreshKey } = useAppContext();
+  const loading = useSimulatedLoading(600, refreshKey);
+  const fmt = useFormat();
+
+  const [goals, setGoals] = useState<SavingsGoal[]>(seedGoals);
   const [activeId, setActiveId] = useState(seedGoals[0].id);
   const [modalOpen, setModalOpen] = useState(false);
   const [contribution, setContribution] = useState("");
 
   const active = goals.find((goal) => goal.id === activeId) ?? goals[0];
-  const activeProgress = (active.saved / active.target) * 100;
+  const activeProgress = ratioToPercent(active.saved, active.target);
+  const complete = activeProgress >= 100;
 
   const totals = useMemo(() => {
     const saved = goals.reduce((sum, goal) => sum + goal.saved, 0);
@@ -36,90 +45,143 @@ export function GoalsPage() {
     return { saved, target, monthly };
   }, [goals]);
 
+  const monthsLeft = monthsRemaining(active.target, active.saved, active.monthlyContribution);
+
   function addContribution() {
     const amount = Number(contribution);
+
     if (!Number.isFinite(amount) || amount <= 0) {
-      addToast({ title: "Enter an amount", body: "Contribution must be a positive number.", tone: "warning" });
+      addToast({
+        title: "Enter an amount",
+        body: "The contribution must be a positive number.",
+        tone: "warning"
+      });
       return;
     }
 
+    const headroom = Math.max(0, active.target - active.saved);
+    if (headroom === 0) {
+      addToast({
+        title: "Goal already funded",
+        body: `${active.name} has reached its target.`,
+        tone: "info"
+      });
+      return;
+    }
+
+    const applied = Math.min(amount, headroom);
+
     setGoals((current) =>
       current.map((goal) =>
-        goal.id === active.id
-          ? { ...goal, saved: Math.min(goal.target, goal.saved + amount) }
-          : goal
+        goal.id === active.id ? { ...goal, saved: goal.saved + applied } : goal
       )
     );
+
     addToast({
       title: "Contribution added",
-      body: `${formatCurrency(amount)} moved into ${active.name}.`,
+      body:
+        applied < amount
+          ? `${fmt.money(applied)} applied — ${active.name} is now fully funded.`
+          : `${fmt.money(applied)} moved into ${active.name}.`,
       tone: "success"
     });
+
     setContribution("");
     setModalOpen(false);
   }
 
   return (
     <>
-      <section className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="Total saved" value={totals.saved} icon={Target} caption={`across ${goals.length} goals`} loading={loading} />
-        <StatCard label="Combined target" value={totals.target} icon={TrendingUp} caption={`${((totals.saved / totals.target) * 100).toFixed(0)}% funded`} loading={loading} />
-        <StatCard label="Monthly contributions" value={totals.monthly} icon={CalendarClock} caption="automated transfers" loading={loading} />
+      <section aria-label="Savings summary" className="grid animate-rise gap-4 sm:grid-cols-3">
+        <StatCard
+          label="Total saved"
+          value={totals.saved}
+          icon={Target}
+          caption={`across ${goals.length} goals`}
+          loading={loading}
+          tone="gain"
+        />
+        <StatCard
+          label="Combined target"
+          value={totals.target}
+          icon={TrendingUp}
+          caption={`${ratioToPercent(totals.saved, totals.target).toFixed(0)}% funded`}
+          loading={loading}
+        />
+        <StatCard
+          label="Monthly contributions"
+          value={totals.monthly}
+          icon={CalendarClock}
+          caption="automated transfers"
+          loading={loading}
+        />
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr),minmax(0,1fr)]">
+      <section className="grid animate-rise gap-4 stagger-1 xl:grid-cols-[minmax(0,1.4fr),minmax(0,1fr)]">
         <Card>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold">Savings goals</h2>
-              <p className="text-sm text-inkMuted">Select a goal to see its funding plan</p>
-            </div>
-            <button
-              onClick={() => setModalOpen(true)}
-              className="inline-flex items-center gap-2 rounded-2xl bg-ink px-4 py-2.5 text-sm font-medium text-white transition hover:-translate-y-0.5 dark:bg-white dark:text-slate-950"
-            >
-              <Plus size={16} /> Add funds
-            </button>
-          </div>
+          <CardHeader
+            title="Savings goals"
+            description="Select a goal to see its funding plan"
+            actions={
+              <Button variant="accent" icon={Plus} onClick={() => setModalOpen(true)}>
+                Add funds
+              </Button>
+            }
+          />
 
-          <div className="mt-5 space-y-4">
+          <div className="mt-5 space-y-3">
             {loading
               ? Array.from({ length: 4 }).map((_, index) => (
-                  <Skeleton key={index} className="h-28 w-full" />
+                  <Skeleton key={index} className="h-28 w-full rounded-card" />
                 ))
               : goals.map((goal, index) => {
-                  const percent = (goal.saved / goal.target) * 100;
-                  const complete = percent >= 100;
+                  const percent = ratioToPercent(goal.saved, goal.target);
+                  const funded = percent >= 100;
                   const selected = goal.id === activeId;
 
                   return (
                     <button
                       key={goal.id}
+                      type="button"
                       onClick={() => setActiveId(goal.id)}
-                      className={`w-full rounded-3xl border p-4 text-left transition duration-300 hover:-translate-y-0.5 hover:shadow-soft ${
+                      aria-pressed={selected}
+                      className={cn(
+                        "w-full rounded-card border p-4 text-left transition duration-200 ease-smooth",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-aurum-400 focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
                         selected
-                          ? "border-brand-400 bg-gradient-to-br from-brand-500/12 to-accent-500/8 ring-2 ring-brand-400/30"
-                          : "border-line hover:bg-white/60 dark:hover:bg-white/5"
-                      }`}
+                          ? "border-aurum-400/60 bg-aurum-400/[0.06] ring-1 ring-aurum-400/40"
+                          : "border-line hover:border-lineStrong hover:bg-surfaceMuted"
+                      )}
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="truncate font-semibold">{goal.name}</p>
+                          <p className="truncate font-semibold text-ink">{goal.name}</p>
                           <p className="mt-0.5 truncate text-xs text-inkMuted">{goal.purpose}</p>
                         </div>
-                        <div className="text-right">
-                          <p className="font-semibold tabular-nums">{formatCurrency(goal.saved)}</p>
-                          <p className="text-xs text-inkMuted">of {formatCurrency(goal.target)}</p>
+                        <div className="shrink-0 text-right">
+                          <p className="numeric font-semibold text-ink">{fmt.money(goal.saved)}</p>
+                          <p className="text-xs text-inkMuted">of {fmt.money(goal.target)}</p>
                         </div>
                       </div>
 
-                      <Progress value={percent} className="mt-3.5" delayMs={index * 90} />
+                      <Progress
+                        value={percent}
+                        color={funded ? "var(--gain)" : undefined}
+                        className="mt-3.5"
+                        delayMs={index * 80}
+                        label={`${goal.name} funding progress`}
+                      />
 
                       <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
-                        <span className={complete ? "font-semibold text-brand-600 dark:text-brand-300" : "text-inkMuted"}>
-                          {complete ? "Fully funded" : `${percent.toFixed(0)}% funded`}
+                        <span
+                          className={cn(
+                            "numeric font-medium",
+                            funded ? "font-semibold text-gain-600 dark:text-gain-400" : "text-inkMuted"
+                          )}
+                        >
+                          {funded ? "Fully funded" : `${percent.toFixed(0)}% funded`}
                         </span>
-                        <span className="text-inkMuted">Target {formatDate(goal.targetDate)}</span>
+                        <span className="text-inkMuted">Target {fmt.date(goal.targetDate)}</span>
                       </div>
                     </button>
                   );
@@ -129,52 +191,72 @@ export function GoalsPage() {
 
         <div className="space-y-4">
           <Card className="text-center">
-            <h2 className="text-base font-semibold">{active.name}</h2>
+            <h2 className="text-[0.9375rem] font-semibold tracking-tight text-ink">{active.name}</h2>
             <p className="mt-1 text-sm text-inkMuted">{active.purpose}</p>
+
             <div className="mt-6 flex justify-center">
-              <RingProgress value={activeProgress} size={168} stroke={13}>
-                <div>
-                  <p className="text-3xl font-semibold tabular-nums">{activeProgress.toFixed(0)}%</p>
-                  <p className="mt-0.5 text-xs text-inkMuted">funded</p>
-                </div>
-              </RingProgress>
+              {loading ? (
+                <Skeleton className="h-[168px] w-[168px] rounded-full" />
+              ) : (
+                <RingProgress
+                  value={activeProgress}
+                  size={168}
+                  stroke={12}
+                  color={complete ? "var(--gain)" : "#e8b34a"}
+                  label={`${active.name} funding progress`}
+                >
+                  <div>
+                    <p className="numeric text-3xl font-semibold text-ink">
+                      {activeProgress.toFixed(0)}%
+                    </p>
+                    <p className="mt-0.5 text-xs text-inkMuted">funded</p>
+                  </div>
+                </RingProgress>
+              )}
             </div>
+
             <div className="mt-6 grid grid-cols-2 gap-3 text-left">
-              <div className="rounded-2xl border border-line p-3">
+              <div className="rounded-control border border-line p-3">
                 <p className="text-xs text-inkMuted">Saved</p>
-                <p className="mt-1 font-semibold tabular-nums">{formatCurrency(active.saved)}</p>
+                <p className="numeric mt-1 font-semibold text-ink">{fmt.money(active.saved)}</p>
               </div>
-              <div className="rounded-2xl border border-line p-3">
+              <div className="rounded-control border border-line p-3">
                 <p className="text-xs text-inkMuted">Remaining</p>
-                <p className="mt-1 font-semibold tabular-nums">
-                  {formatCurrency(Math.max(0, active.target - active.saved))}
+                <p className="numeric mt-1 font-semibold text-ink">
+                  {fmt.money(Math.max(0, active.target - active.saved))}
                 </p>
               </div>
             </div>
           </Card>
 
           <Card>
-            <h2 className="text-base font-semibold">Funding plan</h2>
-            <dl className="mt-4 space-y-3 text-sm">
+            <CardHeader title="Funding plan" />
+            <dl className="mt-4 space-y-2.5 text-sm">
               <div className="flex justify-between gap-4">
                 <dt className="text-inkMuted">Monthly contribution</dt>
-                <dd className="font-medium tabular-nums">
-                  {formatCurrency(active.monthlyContribution)}
+                <dd className="numeric font-medium text-ink">
+                  {fmt.money(active.monthlyContribution)}
                 </dd>
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-inkMuted">Months remaining</dt>
-                <dd className="font-medium tabular-nums">
-                  {monthsRemaining(active.target, active.saved, active.monthlyContribution)}
+                <dd className="numeric font-medium text-ink">
+                  {monthsLeft === 0
+                    ? "Funded"
+                    : Number.isFinite(monthsLeft)
+                      ? monthsLeft
+                      : "No contribution set"}
                 </dd>
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-inkMuted">Target date</dt>
-                <dd className="font-medium">{formatDate(active.targetDate)}</dd>
+                <dd className="font-medium text-ink">{fmt.date(active.targetDate)}</dd>
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-inkMuted">Funded from</dt>
-                <dd className="text-right font-medium">{accountMap[active.accountId].name}</dd>
+                <dd className="text-right font-medium text-ink">
+                  {accountMap[active.accountId].name}
+                </dd>
               </div>
             </dl>
           </Card>
@@ -184,30 +266,33 @@ export function GoalsPage() {
       <Modal
         open={modalOpen}
         title={`Add funds to ${active.name}`}
-        description="Contributions are applied immediately and capped at the goal target."
+        description="Contributions apply immediately and are capped at the goal target."
         onClose={() => setModalOpen(false)}
         onSubmit={addContribution}
         submitLabel="Add contribution"
       >
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium">Amount (USD)</span>
-          <input
+        <Field label="Amount (USD)" hint="Entered in USD regardless of display currency.">
+          <Input
             value={contribution}
             onChange={(event) => setContribution(event.target.value)}
-            inputMode="numeric"
+            inputMode="decimal"
             placeholder="e.g. 5000"
-            className="w-full rounded-2xl border border-line bg-white/60 px-4 py-3 text-sm outline-none focus:border-accent-400 dark:bg-slate-950/50"
+            aria-label="Contribution amount in US dollars"
+            onKeyDown={(event) => {
+              if (event.key === "Enter") addContribution();
+            }}
           />
-        </label>
+        </Field>
         <div className="mt-3 flex flex-wrap gap-2">
-          {[2500, 5000, 10000].map((preset) => (
-            <button
+          {presets.map((preset) => (
+            <Button
               key={preset}
+              variant="secondary"
+              size="sm"
               onClick={() => setContribution(String(preset))}
-              className="rounded-xl border border-line px-3 py-1.5 text-xs font-medium transition hover:bg-white/70 dark:hover:bg-white/5"
             >
-              {formatCurrency(preset)}
-            </button>
+              {fmt.money(preset)}
+            </Button>
           ))}
         </div>
       </Modal>

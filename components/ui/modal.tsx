@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -12,6 +12,7 @@ interface ModalProps {
   children: React.ReactNode;
   onSubmit?: () => void;
   submitLabel?: string;
+  submitting?: boolean;
 }
 
 export function Modal({
@@ -21,22 +22,58 @@ export function Modal({
   onClose,
   children,
   onSubmit,
-  submitLabel = "Save"
+  submitLabel = "Save",
+  submitting = false
 }: ModalProps) {
-  // Close on Escape and lock body scroll while the dialog is open.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const restoreFocus = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     if (!open) return;
 
+    restoreFocus.current = document.activeElement as HTMLElement | null;
+
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      // Trap focus: a dialog the keyboard can walk out of is not modal.
+      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      if (!focusable?.length) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
+
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     window.addEventListener("keydown", onKey);
 
+    // Move focus into the dialog on the next frame, after it paints.
+    const raf = requestAnimationFrame(() => {
+      dialogRef.current
+        ?.querySelector<HTMLElement>('input, select, textarea, button:not([aria-label="Close dialog"])')
+        ?.focus();
+    });
+
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKey);
+      cancelAnimationFrame(raf);
+      restoreFocus.current?.focus?.();
     };
   }, [open, onClose]);
 
@@ -44,25 +81,32 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/50 p-4 backdrop-blur-sm sm:items-center"
+      className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/60 p-4 backdrop-blur-sm animate-fade sm:items-center"
       onClick={onClose}
       role="presentation"
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby="modal-title"
+        aria-describedby="modal-description"
         onClick={(event) => event.stopPropagation()}
-        className="w-full max-w-lg animate-rise rounded-[32px] border border-line bg-panel p-6 shadow-luxe backdrop-blur-xl"
+        className="w-full max-w-lg animate-rise rounded-panel border border-line bg-surface p-6 shadow-overlay"
       >
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-lg font-semibold">{title}</h3>
-            <p className="mt-1.5 text-sm leading-relaxed text-inkMuted">{description}</p>
+          <div className="min-w-0">
+            <h2 id="modal-title" className="text-base font-semibold tracking-tight">
+              {title}
+            </h2>
+            <p id="modal-description" className="mt-1.5 text-sm leading-relaxed text-inkMuted">
+              {description}
+            </p>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="shrink-0 rounded-full p-2 text-inkMuted transition hover:bg-slate-900/5 dark:hover:bg-white/10"
+            className="-mr-1 -mt-1 shrink-0 rounded-control p-2 text-inkMuted transition hover:bg-surfaceMuted hover:text-ink"
             aria-label="Close dialog"
           >
             <X size={18} />
@@ -71,11 +115,15 @@ export function Modal({
 
         <div className="mt-6">{children}</div>
 
-        <div className="mt-6 flex justify-end gap-3">
+        <div className="mt-7 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          {onSubmit ? <Button onClick={onSubmit}>{submitLabel}</Button> : null}
+          {onSubmit ? (
+            <Button variant="accent" onClick={onSubmit} loading={submitting}>
+              {submitLabel}
+            </Button>
+          ) : null}
         </div>
       </div>
     </div>

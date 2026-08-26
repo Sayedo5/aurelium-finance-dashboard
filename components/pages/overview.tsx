@@ -1,60 +1,121 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowRight,
   ArrowUpRight,
+  CalendarClock,
+  CircleDollarSign,
   Landmark,
   PiggyBank,
   TrendingDown,
-  TrendingUp
+  TrendingUp,
+  Wallet
 } from "lucide-react";
 import { CategoryDonut, IncomeExpenseChart, NetCashChart } from "@/components/charts/finance-charts";
-import { Card } from "@/components/ui/card";
+import { Card, CardHeader } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatCard } from "@/components/ui/stat-card";
-import { StatusBadge } from "@/components/ui/badge";
-import { budgets, categoryMap, monthlySeries, savingsGoals } from "@/lib/mock-data";
+import { StatusBadge, Badge } from "@/components/ui/badge";
+import { SegmentedControl } from "@/components/ui/field";
+import { ErrorBoundary } from "@/components/ui/states";
+import {
+  TODAY,
+  budgets,
+  categoryMap,
+  clientMap,
+  daysBetween,
+  invoiceTotal,
+  monthlySeries,
+  savingsGoals,
+  upcomingEvents,
+  vendorMap
+} from "@/lib/mock-data";
 import { useSimulatedLoading } from "@/lib/hooks";
+import { useAppContext, useFormat } from "@/components/providers/app-provider";
 import {
   currentMonth,
+  currentMonthKey,
+  overdueBills,
+  overdueInvoices,
   previousMonth,
   recentTransactions,
   savingsRate,
   signedAmount,
   spendByCategory,
-  totalBalance
+  totalBalance,
+  totalPayable,
+  totalReceivable
 } from "@/lib/selectors";
-import { cn, formatCurrency, formatDate, formatSigned, percentChange } from "@/lib/utils";
+import { cn, percentChange, ratioToPercent } from "@/lib/utils";
 
-const ranges = [
-  { id: "3m", label: "3M", months: 3 },
-  { id: "6m", label: "6M", months: 6 }
-] as const;
+type RangeId = "3m" | "6m" | "12m";
+
+const ranges: Array<{ id: RangeId; label: string }> = [
+  { id: "3m", label: "3M" },
+  { id: "6m", label: "6M" },
+  { id: "12m", label: "12M" }
+];
+
+const rangeMonths: Record<RangeId, number> = { "3m": 3, "6m": 6, "12m": 12 };
 
 export function OverviewPage() {
-  const loading = useSimulatedLoading();
-  const [range, setRange] = useState<(typeof ranges)[number]["id"]>("6m");
+  const { refreshKey } = useAppContext();
+  const loading = useSimulatedLoading(600, refreshKey);
+  const fmt = useFormat();
 
-  const activeRange = ranges.find((item) => item.id === range) ?? ranges[1];
-  const series = monthlySeries.slice(-activeRange.months);
-  const breakdown = spendByCategory("2026-07").slice(0, 6);
-  const recent = recentTransactions(6);
+  const [range, setRange] = useState<RangeId>("6m");
+
+  const series = useMemo(() => monthlySeries.slice(-rangeMonths[range]), [range]);
+  const breakdown = useMemo(() => spendByCategory(currentMonthKey).slice(0, 6), []);
+  const recent = useMemo(() => recentTransactions(6), []);
+  const nextUp = useMemo(() => upcomingEvents.slice(0, 5), []);
 
   const topGoal = savingsGoals[0];
-  const goalProgress = (topGoal.saved / topGoal.target) * 100;
+  const goalProgress = ratioToPercent(topGoal.saved, topGoal.target);
+
+  const attention = [
+    overdueInvoices.length > 0
+      ? {
+          id: "invoices",
+          label: `${overdueInvoices.length} overdue invoices`,
+          detail: `${fmt.money(overdueInvoices.reduce((sum, invoice) => sum + invoiceTotal(invoice), 0))} outstanding`,
+          href: "/dashboard/invoices"
+        }
+      : null,
+    overdueBills.length > 0
+      ? {
+          id: "bills",
+          label: `${overdueBills.length} overdue bills`,
+          detail: `${fmt.money(overdueBills.reduce((sum, bill) => sum + bill.amount, 0))} to pay`,
+          href: "/dashboard/bills"
+        }
+      : null,
+    budgets.filter((budget) => budget.spent > budget.allocated).length > 0
+      ? {
+          id: "budgets",
+          label: `${budgets.filter((budget) => budget.spent > budget.allocated).length} budget over allocation`,
+          detail: "July spend has breached the plan",
+          href: "/dashboard/budgets"
+        }
+      : null
+  ].filter(Boolean) as Array<{ id: string; label: string; detail: string; href: string }>;
 
   return (
     <>
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section
+        aria-label="Key figures"
+        className="grid animate-rise gap-4 sm:grid-cols-2 xl:grid-cols-4"
+      >
         <StatCard
           label="Total balance"
           value={totalBalance}
           icon={Landmark}
           delta={4.2}
-          caption="across 3 accounts"
+          caption="across 4 cash accounts"
           loading={loading}
         />
         <StatCard
@@ -64,6 +125,7 @@ export function OverviewPage() {
           delta={percentChange(currentMonth.income, previousMonth.income)}
           caption="vs. June"
           loading={loading}
+          tone="gain"
         />
         <StatCard
           label="Expenses this month"
@@ -73,6 +135,7 @@ export function OverviewPage() {
           invertDelta
           caption="vs. June"
           loading={loading}
+          tone="loss"
         />
         <StatCard
           label="Net cash"
@@ -84,100 +147,196 @@ export function OverviewPage() {
         />
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr),minmax(0,1fr)]">
-        <Card>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold">Income vs. expenses</h2>
-              <p className="text-sm text-inkMuted">Cleared activity, transfers excluded</p>
+      {/* Working capital + needs attention */}
+      <section className="grid animate-rise gap-4 stagger-1 lg:grid-cols-3">
+        <Link href="/dashboard/invoices" className="block">
+          <Card interactive className="h-full">
+            <div className="flex items-start justify-between gap-3">
+              <p className="eyebrow">Receivable</p>
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-control border border-line bg-surfaceMuted text-gain-600 dark:text-gain-400">
+                <CircleDollarSign size={17} aria-hidden />
+              </span>
             </div>
-            <div className="flex rounded-2xl border border-line bg-white/60 p-1 dark:bg-slate-950/50">
-              {ranges.map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => setRange(item.id)}
-                  className={cn(
-                    "rounded-xl px-3.5 py-1.5 text-xs font-semibold transition",
-                    range === item.id
-                      ? "bg-ink text-white shadow-soft dark:bg-white dark:text-slate-950"
-                      : "text-inkMuted hover:text-ink dark:hover:text-white"
-                  )}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="mt-5">
-            {loading ? <Skeleton className="h-[300px] w-full" /> : <IncomeExpenseChart data={series} />}
-          </div>
-        </Card>
-
-        <Card>
-          <h2 className="text-base font-semibold">July spend by category</h2>
-          <p className="text-sm text-inkMuted">Where this month&apos;s money went</p>
-          <div className="mt-4">
             {loading ? (
-              <Skeleton className="mx-auto h-[240px] w-[240px] rounded-full" />
+              <Skeleton className="mt-3.5 h-8 w-32" />
             ) : (
-              <CategoryDonut data={breakdown} height={240} />
+              <p className="numeric mt-3.5 text-2xl font-semibold text-ink">
+                {fmt.money(totalReceivable)}
+              </p>
             )}
+            <p className="mt-2 text-xs text-inkMuted">Money owed to the business</p>
+          </Card>
+        </Link>
+
+        <Link href="/dashboard/bills" className="block">
+          <Card interactive className="h-full">
+            <div className="flex items-start justify-between gap-3">
+              <p className="eyebrow">Payable</p>
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-control border border-line bg-surfaceMuted text-loss-600 dark:text-loss-400">
+                <Wallet size={17} aria-hidden />
+              </span>
+            </div>
+            {loading ? (
+              <Skeleton className="mt-3.5 h-8 w-32" />
+            ) : (
+              <p className="numeric mt-3.5 text-2xl font-semibold text-ink">
+                {fmt.money(totalPayable)}
+              </p>
+            )}
+            <p className="mt-2 text-xs text-inkMuted">Bills scheduled and overdue</p>
+          </Card>
+        </Link>
+
+        <Card className="h-full">
+          <div className="flex items-start justify-between gap-3">
+            <p className="eyebrow">Needs attention</p>
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-control border border-line bg-surfaceMuted text-caution-700 dark:text-caution-300">
+              <AlertTriangle size={17} aria-hidden />
+            </span>
           </div>
-          <div className="mt-4 space-y-2.5">
-            {breakdown.slice(0, 4).map((slice) => (
-              <div key={slice.name} className="flex items-center gap-3 text-sm">
-                <span
-                  className="h-2.5 w-2.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: slice.color }}
-                />
-                <span className="truncate text-inkMuted">{slice.name}</span>
-                <span className="ml-auto font-semibold tabular-nums">
-                  {formatCurrency(slice.value)}
-                </span>
-              </div>
-            ))}
-          </div>
+          {loading ? (
+            <div className="mt-3.5 space-y-2">
+              <Skeleton className="h-5 w-full" />
+              <Skeleton className="h-5 w-4/5" />
+            </div>
+          ) : attention.length === 0 ? (
+            <p className="mt-3.5 text-sm text-inkMuted">
+              Nothing overdue. Every budget is within its allocation.
+            </p>
+          ) : (
+            <ul className="mt-3 space-y-1.5">
+              {attention.map((item) => (
+                <li key={item.id}>
+                  <Link
+                    href={item.href}
+                    className="group flex items-center gap-2 rounded-control px-1.5 py-1 transition-colors hover:bg-surfaceMuted"
+                  >
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-caution-500" aria-hidden />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-ink">
+                        {item.label}
+                      </span>
+                      <span className="block truncate text-xs text-inkMuted">{item.detail}</span>
+                    </span>
+                    <ArrowRight
+                      size={14}
+                      aria-hidden
+                      className="shrink-0 text-inkSubtle transition-transform duration-200 group-hover:translate-x-0.5"
+                    />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr),minmax(0,1fr)]">
-        <Card className="overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold">Recent transactions</h2>
-              <p className="text-sm text-inkMuted">Latest activity across all accounts</p>
-            </div>
-            <Link
-              href="/transactions"
-              className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 transition hover:gap-2.5 dark:text-brand-300"
-            >
-              View all <ArrowRight size={15} />
-            </Link>
+      <section className="grid animate-rise gap-4 stagger-2 xl:grid-cols-[minmax(0,1.6fr),minmax(0,1fr)]">
+        <Card>
+          <CardHeader
+            title="Income vs. expenses"
+            description="Cleared activity, transfers excluded"
+            actions={
+              <SegmentedControl
+                label="Chart range"
+                options={ranges}
+                value={range}
+                onChange={setRange}
+              />
+            }
+          />
+          <div className="mt-5">
+            {loading ? (
+              <Skeleton className="h-[300px] w-full" />
+            ) : (
+              <ErrorBoundary section="Income vs. expenses">
+                <IncomeExpenseChart data={series} />
+              </ErrorBoundary>
+            )}
           </div>
+        </Card>
 
-          <div className="mt-4 space-y-1">
+        <Card>
+          <CardHeader title="July spend by category" description="Where this month's money went" />
+          <div className="mt-4">
+            {loading ? (
+              <Skeleton className="mx-auto h-[220px] w-[220px] rounded-full" />
+            ) : (
+              <ErrorBoundary section="Spend breakdown">
+                <CategoryDonut data={breakdown} height={220} />
+              </ErrorBoundary>
+            )}
+          </div>
+          <ul className="mt-5 space-y-2.5 border-t border-line pt-4">
+            {loading
+              ? Array.from({ length: 4 }).map((_, index) => (
+                  <li key={index}>
+                    <Skeleton className="h-4 w-full" />
+                  </li>
+                ))
+              : breakdown.slice(0, 4).map((slice) => (
+                  <li key={slice.name} className="flex items-center gap-3 text-sm">
+                    <span
+                      aria-hidden
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: slice.color }}
+                    />
+                    <span className="truncate text-inkMuted">{slice.name}</span>
+                    <span className="numeric ml-auto shrink-0 font-semibold">
+                      {fmt.money(slice.value)}
+                    </span>
+                  </li>
+                ))}
+          </ul>
+        </Card>
+      </section>
+
+      <section className="grid animate-rise gap-4 stagger-3 xl:grid-cols-[minmax(0,1.6fr),minmax(0,1fr)]">
+        <Card>
+          <CardHeader
+            title="Recent transactions"
+            description="Latest activity across all accounts"
+            actions={
+              <Link
+                href="/dashboard/transactions"
+                className="group inline-flex items-center gap-1.5 rounded-control px-2 py-1 text-sm font-medium text-aurum-700 transition hover:bg-surfaceMuted dark:text-aurum-400"
+              >
+                View all
+                <ArrowRight
+                  size={15}
+                  aria-hidden
+                  className="transition-transform duration-200 ease-smooth group-hover:translate-x-0.5"
+                />
+              </Link>
+            }
+          />
+
+          <ul className="mt-4 space-y-0.5">
             {loading
               ? Array.from({ length: 6 }).map((_, index) => (
-                  <Skeleton key={index} className="h-16 w-full" />
+                  <li key={index} className="px-2 py-3">
+                    <Skeleton className="h-10 w-full" />
+                  </li>
                 ))
               : recent.map((tx) => {
                   const category = categoryMap[tx.categoryId];
                   const signed = signedAmount(tx);
                   return (
-                    <div
+                    <li
                       key={tx.id}
-                      className="flex items-center gap-3 rounded-2xl px-2 py-3 transition hover:bg-white/70 dark:hover:bg-white/5"
+                      className="flex items-center gap-3 rounded-control px-2 py-2.5 transition-colors duration-150 hover:bg-surfaceMuted"
                     >
                       <span
-                        className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-xs font-bold text-white"
+                        aria-hidden
+                        className="grid h-9 w-9 shrink-0 place-items-center rounded-control text-[11px] font-bold text-white"
                         style={{ backgroundColor: category.color }}
                       >
                         {tx.merchant.slice(0, 2).toUpperCase()}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{tx.merchant}</p>
+                        <p className="truncate text-sm font-medium text-ink">{tx.merchant}</p>
                         <p className="truncate text-xs text-inkMuted">
-                          {category.label} · {formatDate(tx.date)}
+                          {category.label} · {fmt.date(tx.date)}
                         </p>
                       </div>
                       <div className="hidden sm:block">
@@ -185,67 +344,119 @@ export function OverviewPage() {
                       </div>
                       <p
                         className={cn(
-                          "shrink-0 text-sm font-semibold tabular-nums",
-                          signed >= 0 ? "text-brand-600 dark:text-brand-300" : "text-ink"
+                          "numeric shrink-0 text-sm font-semibold",
+                          signed >= 0 ? "text-gain-600 dark:text-gain-400" : "text-ink"
                         )}
                       >
-                        {formatSigned(signed)}
+                        {fmt.signed(signed)}
                       </p>
-                    </div>
+                    </li>
                   );
                 })}
-          </div>
+          </ul>
         </Card>
 
         <div className="space-y-4">
+          {/* Coming up */}
           <Card>
-            <h2 className="text-base font-semibold">Net cash by month</h2>
-            <p className="text-sm text-inkMuted">Income minus expenses</p>
+            <CardHeader
+              title="Coming up"
+              description="Next dated obligations"
+              actions={
+                <Link
+                  href="/dashboard/calendar"
+                  aria-label="Open the calendar"
+                  className="grid h-8 w-8 place-items-center rounded-control border border-line text-inkMuted transition hover:border-lineStrong hover:text-ink"
+                >
+                  <CalendarClock size={15} aria-hidden />
+                </Link>
+              }
+            />
+            <ul className="mt-4 space-y-0.5">
+              {loading
+                ? Array.from({ length: 4 }).map((_, index) => (
+                    <li key={index} className="py-2">
+                      <Skeleton className="h-8 w-full" />
+                    </li>
+                  ))
+                : nextUp.map((event) => {
+                    const days = daysBetween(TODAY, event.date);
+                    return (
+                      <li
+                        key={event.id}
+                        className="flex items-center gap-3 rounded-control px-1.5 py-2 transition-colors hover:bg-surfaceMuted"
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium text-ink">
+                            {event.title}
+                          </span>
+                          <span className="block truncate text-xs text-inkMuted">
+                            {fmt.date(event.date)}
+                          </span>
+                        </span>
+                        <Badge tone={days <= 3 ? "warn" : "neutral"}>
+                          {days === 0 ? "Today" : `${days}d`}
+                        </Badge>
+                      </li>
+                    );
+                  })}
+            </ul>
+          </Card>
+
+          <Card>
+            <CardHeader title="Net cash by month" description="Income minus expenses" />
             <div className="mt-4">
-              {loading ? <Skeleton className="h-[220px] w-full" /> : <NetCashChart data={series} height={220} />}
+              {loading ? (
+                <Skeleton className="h-[180px] w-full" />
+              ) : (
+                <ErrorBoundary section="Net cash">
+                  <NetCashChart data={series} height={180} />
+                </ErrorBoundary>
+              )}
             </div>
           </Card>
 
-          <Card className="transition hover:shadow-luxe">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold">{topGoal.name}</h2>
-                <p className="mt-1 text-sm text-inkMuted">{topGoal.purpose}</p>
-              </div>
-              <Link
-                href="/goals"
-                className="shrink-0 rounded-xl border border-line p-2 text-inkMuted transition hover:text-ink dark:hover:text-white"
-                aria-label="Open savings goals"
-              >
-                <ArrowUpRight size={16} />
-              </Link>
+          <Card>
+            <CardHeader
+              title={topGoal.name}
+              description={topGoal.purpose}
+              actions={
+                <Link
+                  href="/dashboard/goals"
+                  aria-label="Open savings goals"
+                  className="grid h-8 w-8 place-items-center rounded-control border border-line text-inkMuted transition hover:border-lineStrong hover:text-ink"
+                >
+                  <ArrowUpRight size={15} aria-hidden />
+                </Link>
+              }
+            />
+            <div className="mt-4 flex items-baseline justify-between gap-2 text-sm">
+              <span className="numeric text-lg font-semibold">{fmt.money(topGoal.saved)}</span>
+              <span className="text-inkMuted">of {fmt.money(topGoal.target)}</span>
             </div>
-            <div className="mt-4 flex items-baseline justify-between text-sm">
-              <span className="text-lg font-semibold tabular-nums">
-                {formatCurrency(topGoal.saved)}
-              </span>
-              <span className="text-inkMuted">of {formatCurrency(topGoal.target)}</span>
-            </div>
-            <Progress value={goalProgress} className="mt-3" />
+            <Progress
+              value={goalProgress}
+              className="mt-3"
+              label={`${topGoal.name} funding progress`}
+            />
             <p className="mt-2.5 text-xs text-inkMuted">
-              {goalProgress.toFixed(0)}% funded · {formatCurrency(topGoal.monthlyContribution)}/mo
+              {goalProgress.toFixed(0)}% funded · {fmt.money(topGoal.monthlyContribution)}/mo
             </p>
           </Card>
 
           <Card>
-            <h2 className="text-base font-semibold">Budget health</h2>
-            <p className="text-sm text-inkMuted">July allocations</p>
-            <div className="mt-4 space-y-4">
+            <CardHeader title="Budget health" description="July allocations" />
+            <div className="mt-4 space-y-3.5">
               {budgets.slice(0, 4).map((budget, index) => {
-                const percent = (budget.spent / budget.allocated) * 100;
+                const percent = ratioToPercent(budget.spent, budget.allocated);
                 return (
                   <div key={budget.id}>
                     <div className="flex items-baseline justify-between gap-2 text-sm">
-                      <span className="truncate font-medium">{budget.label}</span>
+                      <span className="truncate font-medium text-ink">{budget.label}</span>
                       <span
                         className={cn(
-                          "shrink-0 tabular-nums",
-                          percent > 100 ? "font-semibold text-danger" : "text-inkMuted"
+                          "numeric shrink-0 text-xs font-semibold",
+                          percent > 100 ? "text-loss-600 dark:text-loss-400" : "text-inkMuted"
                         )}
                       >
                         {percent.toFixed(0)}%
@@ -255,17 +466,23 @@ export function OverviewPage() {
                       value={percent}
                       color={categoryMap[budget.categoryId].color}
                       className="mt-2"
-                      delayMs={index * 90}
+                      delayMs={index * 80}
+                      label={`${budget.label} budget used`}
                     />
                   </div>
                 );
               })}
             </div>
             <Link
-              href="/budgets"
-              className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 transition hover:gap-2.5 dark:text-brand-300"
+              href="/dashboard/budgets"
+              className="group mt-5 inline-flex items-center gap-1.5 text-sm font-medium text-aurum-700 dark:text-aurum-400"
             >
-              Manage budgets <ArrowRight size={15} />
+              Manage budgets
+              <ArrowRight
+                size={15}
+                aria-hidden
+                className="transition-transform duration-200 ease-smooth group-hover:translate-x-0.5"
+              />
             </Link>
           </Card>
         </div>

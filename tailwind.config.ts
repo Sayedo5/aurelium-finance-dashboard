@@ -1,80 +1,145 @@
 import type { Config } from "tailwindcss";
 
+/**
+ * Aurelium design system.
+ *
+ * Everything a component can reach for is declared here, so a page never
+ * invents a one-off radius, shadow or colour. Surface colours resolve through
+ * CSS variables (see app/globals.css) so light and dark share one set of class
+ * names; brand and semantic colours are literal because gold reads the same in
+ * both themes.
+ */
 const config: Config = {
-  content: [
-    "./app/**/*.{ts,tsx}",
-    "./components/**/*.{ts,tsx}",
-    "./lib/**/*.{ts,tsx}"
-  ],
+  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],
   darkMode: "class",
   theme: {
     extend: {
+      fontFamily: {
+        sans: ["var(--font-inter)", "ui-sans-serif", "system-ui", "sans-serif"]
+      },
+
       colors: {
+        /* Surfaces and text — theme-aware via CSS variables. */
         canvas: "var(--canvas)",
-        panel: "var(--panel)",
-        panelMuted: "var(--panel-muted)",
+        surface: "var(--surface)",
+        surfaceMuted: "var(--surface-muted)",
+        surfaceRaised: "var(--surface-raised)",
         line: "var(--line)",
+        lineStrong: "var(--line-strong)",
         ink: "var(--ink)",
         inkMuted: "var(--ink-muted)",
-        brand: {
-          50: "#ebfdf4",
-          100: "#d4f8e5",
-          200: "#aaf0cc",
-          300: "#76e2aa",
-          400: "#40cb82",
-          500: "#1fb36a",
-          600: "#129154",
-          700: "#0f7345",
-          800: "#115b39",
-          900: "#104b31"
+        inkSubtle: "var(--ink-subtle)",
+
+        /* Aurelium gold — the single accent. */
+        aurum: {
+          50: "#fdf9ed",
+          100: "#faf0d2",
+          200: "#f4dfa1",
+          300: "#eec969",
+          400: "#e8b34a",
+          500: "#d99a29",
+          600: "#bf7a1f",
+          700: "#9d5b1c",
+          800: "#80481e",
+          900: "#6a3c1c",
+          950: "#3d1f0c"
         },
-        accent: {
-          50: "#edf5ff",
-          100: "#d9eaff",
-          200: "#bedbff",
-          300: "#92c3ff",
-          400: "#5fa1ff",
-          500: "#367dff",
-          600: "#215ef5",
-          700: "#1e49df",
-          800: "#213eb4",
-          900: "#22378d"
+
+        /* Semantic money colours. Gain green, loss red — never reused for UI chrome. */
+        gain: {
+          50: "#eefbf3",
+          100: "#d5f5e1",
+          200: "#aeeac7",
+          300: "#79d7a6",
+          400: "#43bd81",
+          500: "#1fa163",
+          600: "#13814f",
+          700: "#116742",
+          800: "#115237",
+          900: "#0f442f"
         },
-        success: "#14b86a",
-        warning: "#f59e0b",
-        danger: "#ef4444"
+        loss: {
+          50: "#fef2f2",
+          100: "#fee2e2",
+          200: "#fecaca",
+          300: "#fca5a5",
+          400: "#f87171",
+          500: "#ef4444",
+          600: "#dc2626",
+          700: "#b91c1c",
+          800: "#991b1b",
+          900: "#7f1d1d"
+        },
+        caution: {
+          100: "#fef3c7",
+          300: "#fcd34d",
+          500: "#f59e0b",
+          700: "#b45309",
+          900: "#78350f"
+        },
+        info: {
+          100: "#dbeafe",
+          300: "#93c5fd",
+          500: "#3b82f6",
+          700: "#1d4ed8",
+          900: "#1e3a8a"
+        }
       },
+
+      /* One radius scale. `control` for inputs/buttons, `card` for panels. */
+      borderRadius: {
+        control: "0.625rem",
+        card: "1rem",
+        panel: "1.25rem",
+        pill: "9999px"
+      },
+
+      /* Depth ladder: raised sits under card, card under overlay. */
       boxShadow: {
-        luxe: "0 28px 80px -32px rgba(2, 8, 23, 0.45)",
-        soft: "0 16px 40px -24px rgba(15, 23, 42, 0.35)"
+        raised: "0 1px 2px rgba(9, 13, 20, 0.06), 0 1px 3px rgba(9, 13, 20, 0.04)",
+        card: "0 1px 2px rgba(9, 13, 20, 0.05), 0 8px 24px -12px rgba(9, 13, 20, 0.14)",
+        lift: "0 2px 4px rgba(9, 13, 20, 0.06), 0 18px 40px -20px rgba(9, 13, 20, 0.28)",
+        overlay: "0 24px 60px -20px rgba(9, 13, 20, 0.45)",
+        glow: "0 0 0 1px rgba(232, 179, 74, 0.35), 0 8px 28px -10px rgba(232, 179, 74, 0.4)"
       },
-      backgroundImage: {
-        mesh:
-          "radial-gradient(circle at top left, rgba(54,125,255,0.18), transparent 34%), radial-gradient(circle at top right, rgba(31,179,106,0.18), transparent 32%), linear-gradient(180deg, rgba(255,255,255,0.85), rgba(244,247,251,1))",
-        "mesh-dark":
-          "radial-gradient(circle at top left, rgba(54,125,255,0.24), transparent 30%), radial-gradient(circle at top right, rgba(31,179,106,0.18), transparent 28%), linear-gradient(180deg, rgba(3,7,18,1), rgba(11,18,32,1))"
+
+      fontSize: {
+        /* Labels sit above their value, so they get their own tracked-out size. */
+        label: ["0.75rem", { lineHeight: "1rem", letterSpacing: "0.06em" }],
+        metric: ["1.875rem", { lineHeight: "2.25rem", letterSpacing: "-0.02em" }],
+        metricLg: ["2.25rem", { lineHeight: "2.5rem", letterSpacing: "-0.025em" }]
       },
+
       keyframes: {
-        float: {
-          "0%, 100%": { transform: "translateY(0px)" },
-          "50%": { transform: "translateY(-10px)" }
-        },
         rise: {
-          "0%": { opacity: "0", transform: "translateY(18px)" },
+          "0%": { opacity: "0", transform: "translateY(10px)" },
           "100%": { opacity: "1", transform: "translateY(0)" }
         },
-        pulseLine: {
-          "0%, 100%": { opacity: "0.5" },
-          "50%": { opacity: "1" }
+        fade: {
+          "0%": { opacity: "0" },
+          "100%": { opacity: "1" }
+        },
+        shimmer: {
+          "100%": { transform: "translateX(100%)" }
+        },
+        slideInRight: {
+          "0%": { opacity: "0", transform: "translateX(16px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" }
+        },
+        spinSlow: {
+          "100%": { transform: "rotate(360deg)" }
         }
       },
       animation: {
-        float: "float 6s ease-in-out infinite",
-        rise: "rise 0.6s ease forwards",
-        pulseLine: "pulseLine 1.6s ease-in-out infinite"
+        rise: "rise 0.35s cubic-bezier(0.22, 1, 0.36, 1) both",
+        fade: "fade 0.3s ease both",
+        shimmer: "shimmer 1.6s infinite",
+        slideInRight: "slideInRight 0.3s cubic-bezier(0.22, 1, 0.36, 1) both",
+        spinSlow: "spinSlow 0.9s linear infinite"
       },
-      borderRadius: {
-        "4xl": "2rem"
+
+      transitionTimingFunction: {
+        smooth: "cubic-bezier(0.22, 1, 0.36, 1)"
       }
     }
   },
