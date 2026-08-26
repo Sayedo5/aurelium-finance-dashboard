@@ -1,11 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   ArrowDown,
   ArrowUp,
   ChevronLeft,
   ChevronRight,
+  ChevronsUpDown,
   Download,
   Search,
   SlidersHorizontal,
@@ -14,32 +16,38 @@ import {
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, Pill } from "@/components/ui/badge";
-import { useAppContext } from "@/components/providers/app-provider";
-import { useSimulatedLoading } from "@/lib/hooks";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/states";
+import { Field, Input, SegmentedControl, Select } from "@/components/ui/field";
+import { useAppContext, useFormat } from "@/components/providers/app-provider";
+import { useDebouncedValue, useSimulatedLoading } from "@/lib/hooks";
 import { accountMap, accounts, categories, categoryMap, months, transactions } from "@/lib/mock-data";
 import { signedAmount } from "@/lib/selectors";
-import { cn, formatCurrency, formatDate, formatSigned } from "@/lib/utils";
-import type { CategoryId, TxDirection, TxStatus } from "@/lib/types";
+import { csvFilename, downloadCsv, toCsv } from "@/lib/csv";
+import { cn } from "@/lib/utils";
+import type { CategoryId, Transaction, TxDirection, TxStatus } from "@/lib/types";
 
 type SortKey = "date" | "merchant" | "amount";
 type SortDir = "asc" | "desc";
+type DirectionFilter = TxDirection | "all";
 
-const PAGE_SIZE = 12;
-
-const directionTabs: Array<{ id: TxDirection | "all"; label: string }> = [
+const directionTabs: Array<{ id: DirectionFilter; label: string }> = [
   { id: "all", label: "All" },
   { id: "income", label: "Income" },
   { id: "expense", label: "Expenses" }
 ];
 
 const statusOptions: Array<TxStatus | "all"> = ["all", "cleared", "pending", "failed"];
+const pageSizes = [12, 25, 50];
 
 export function TransactionsPage() {
-  const loading = useSimulatedLoading();
-  const { addToast } = useAppContext();
+  const { addToast, refreshKey, preferences } = useAppContext();
+  const loading = useSimulatedLoading(600, refreshKey);
+  const fmt = useFormat();
+  const searchParams = useSearchParams();
 
   const [query, setQuery] = useState("");
-  const [direction, setDirection] = useState<TxDirection | "all">("all");
+  const [direction, setDirection] = useState<DirectionFilter>("all");
   const [categoryId, setCategoryId] = useState<CategoryId | "all">("all");
   const [accountId, setAccountId] = useState<string>("all");
   const [status, setStatus] = useState<TxStatus | "all">("all");
@@ -48,11 +56,25 @@ export function TransactionsPage() {
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(pageSizes[0]);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  // Search results deep-link here as /transactions?q=Merchant.
+  const initialQuery = searchParams.get("q");
+  useEffect(() => {
+    if (initialQuery) {
+      setQuery(initialQuery);
+      setPage(1);
+    }
+  }, [initialQuery]);
+
+  const debouncedQuery = useDebouncedValue(query, 180);
 
   const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    // Compare on the YYYY-MM prefix so the range is inclusive of both months.
+    const needle = debouncedQuery.trim().toLowerCase();
+    // Compare on the YYYY-MM prefix so the range is inclusive of both months,
+    // and tolerate the user picking "from" after "to".
     const lower = fromMonth <= toMonth ? fromMonth : toMonth;
     const upper = fromMonth <= toMonth ? toMonth : fromMonth;
 
@@ -70,36 +92,42 @@ export function TransactionsPage() {
       return true;
     });
 
-    const sorted = [...rows].sort((a, b) => {
+    return rows.sort((a, b) => {
       let result = 0;
       if (sortKey === "date") result = a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
       if (sortKey === "merchant") result = a.merchant.localeCompare(b.merchant);
       if (sortKey === "amount") result = signedAmount(a) - signedAmount(b);
+      // Stable tie-break so equal keys never reshuffle between renders.
+      if (result === 0) result = a.id.localeCompare(b.id);
       return sortDir === "asc" ? result : -result;
     });
-
-    return sorted;
-  }, [query, direction, categoryId, accountId, status, fromMonth, toMonth, sortKey, sortDir]);
+  }, [debouncedQuery, direction, categoryId, accountId, status, fromMonth, toMonth, sortKey, sortDir]);
 
   const totals = useMemo(() => {
-    const income = filtered
-      .filter((tx) => tx.direction === "income" && tx.status !== "failed")
-      .reduce((sum, tx) => sum + tx.amount, 0);
-    const expense = filtered
-      .filter((tx) => tx.direction === "expense" && tx.status !== "failed")
-      .reduce((sum, tx) => sum + tx.amount, 0);
+    let income = 0;
+    let expense = 0;
+    for (const tx of filtered) {
+      if (tx.status === "failed") continue;
+      if (tx.direction === "income") income += tx.amount;
+      else expense += tx.amount;
+    }
     return { income, expense, net: income - expense };
   }, [filtered]);
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pageCount);
-  const pageRows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const pageRows = useMemo(
+    () => filtered.slice((safePage - 1) * pageSize, safePage * pageSize),
+    [filtered, safePage, pageSize]
+  );
 
   const activeFilters =
     (direction !== "all" ? 1 : 0) +
     (categoryId !== "all" ? 1 : 0) +
     (accountId !== "all" ? 1 : 0) +
     (status !== "all" ? 1 : 0) +
+    (fromMonth !== months[0].key ? 1 : 0) +
+    (toMonth !== months[months.length - 1].key ? 1 : 0) +
     (query.trim() ? 1 : 0);
 
   function resetFilters() {
@@ -123,126 +151,184 @@ export function TransactionsPage() {
     setPage(1);
   }
 
-  const SortIcon = ({ column }: { column: SortKey }) => {
-    if (sortKey !== column) return <span className="inline-block w-3" />;
-    return sortDir === "asc" ? <ArrowUp size={13} /> : <ArrowDown size={13} />;
-  };
+  /** Exports exactly what is on screen — the filtered set, in the current sort order. */
+  function exportCsv() {
+    if (filtered.length === 0) {
+      addToast({
+        title: "Nothing to export",
+        body: "No transactions match the current filters.",
+        tone: "warning"
+      });
+      return;
+    }
+
+    setExporting(true);
+    const csv = toCsv<Transaction>(filtered, [
+      { header: "ID", value: (tx) => tx.id },
+      { header: "Date", value: (tx) => tx.date },
+      { header: "Merchant", value: (tx) => tx.merchant },
+      { header: "Memo", value: (tx) => tx.memo },
+      { header: "Category", value: (tx) => categoryMap[tx.categoryId].label },
+      { header: "Account", value: (tx) => accountMap[tx.accountId].name },
+      { header: "Method", value: (tx) => tx.method },
+      { header: "Status", value: (tx) => tx.status },
+      { header: "Direction", value: (tx) => tx.direction },
+      { header: "Amount (USD)", value: (tx) => signedAmount(tx).toFixed(2) }
+    ]);
+
+    const ok = downloadCsv(csvFilename("transactions", `${fromMonth}_${toMonth}`), csv);
+    setExporting(false);
+
+    addToast(
+      ok
+        ? {
+            title: "Export downloaded",
+            body: `${filtered.length} transactions saved as CSV.`,
+            tone: "success"
+          }
+        : {
+            title: "Export blocked",
+            body: "Your browser prevented the download. Check its download settings.",
+            tone: "error"
+          }
+    );
+  }
+
+  const compact = preferences.density === "compact";
+  const cellPad = compact ? "px-4 py-2" : "px-4 py-3.5";
+
+  function SortButton({ column, label, align = "left" }: { column: SortKey; label: string; align?: "left" | "right" }) {
+    const active = sortKey === column;
+    const Icon = !active ? ChevronsUpDown : sortDir === "asc" ? ArrowUp : ArrowDown;
+    return (
+      <button
+        type="button"
+        onClick={() => toggleSort(column)}
+        aria-label={`Sort by ${label}`}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded transition-colors hover:text-ink",
+          active ? "text-ink" : "text-inkMuted",
+          align === "right" && "flex-row-reverse"
+        )}
+      >
+        {label}
+        <Icon size={13} aria-hidden className={cn(!active && "opacity-40")} />
+      </button>
+    );
+  }
 
   return (
     <>
-      <section className="grid gap-4 sm:grid-cols-3">
-        <Card className="py-4">
-          <p className="text-sm text-inkMuted">Income in view</p>
-          <p className="mt-1.5 text-2xl font-semibold tabular-nums text-brand-600 dark:text-brand-300">
-            {formatCurrency(totals.income)}
-          </p>
-        </Card>
-        <Card className="py-4">
-          <p className="text-sm text-inkMuted">Expenses in view</p>
-          <p className="mt-1.5 text-2xl font-semibold tabular-nums text-rose-600 dark:text-rose-400">
-            {formatCurrency(totals.expense)}
-          </p>
-        </Card>
-        <Card className="py-4">
-          <p className="text-sm text-inkMuted">Net in view</p>
-          <p
-            className={cn(
-              "mt-1.5 text-2xl font-semibold tabular-nums",
-              totals.net >= 0 ? "text-brand-600 dark:text-brand-300" : "text-rose-600 dark:text-rose-400"
+      <section aria-label="Totals in view" className="grid animate-rise gap-4 sm:grid-cols-3">
+        {[
+          { label: "Income in view", value: totals.income, tone: "gain" as const },
+          { label: "Expenses in view", value: totals.expense, tone: "loss" as const },
+          {
+            label: "Net in view",
+            value: totals.net,
+            tone: totals.net >= 0 ? ("gain" as const) : ("loss" as const),
+            signed: true
+          }
+        ].map((item) => (
+          <Card key={item.label} className="py-4">
+            <p className="eyebrow">{item.label}</p>
+            {loading ? (
+              <Skeleton className="mt-2 h-8 w-32" />
+            ) : (
+              <p
+                className={cn(
+                  "numeric mt-2 text-2xl font-semibold",
+                  item.tone === "gain" ? "text-gain-600 dark:text-gain-400" : "text-loss-600 dark:text-loss-400"
+                )}
+              >
+                {item.signed ? fmt.signed(item.value) : fmt.money(item.value)}
+              </p>
             )}
-          >
-            {formatSigned(totals.net)}
-          </p>
-        </Card>
+          </Card>
+        ))}
       </section>
 
-      <Card className="overflow-hidden p-0">
-        <div className="border-b border-line p-4 sm:p-5">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="relative min-w-[200px] flex-1">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-inkMuted" size={16} />
-              <input
+      <Card flush className="animate-rise stagger-1">
+        {/* Toolbar */}
+        <div className="border-b border-line p-4">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="relative min-w-[180px] flex-1">
+              <Input
+                icon={Search}
+                type="search"
                 value={query}
                 onChange={(event) => {
                   setQuery(event.target.value);
                   setPage(1);
                 }}
                 placeholder="Search merchant, memo or ID…"
-                className="w-full rounded-2xl border border-line bg-white/60 py-2.5 pl-10 pr-9 text-sm outline-none transition focus:border-accent-400 focus:ring-2 focus:ring-accent-100 dark:bg-slate-950/50 dark:focus:ring-accent-900/40"
+                aria-label="Search transactions"
+                className="pr-9 [&::-webkit-search-cancel-button]:hidden"
               />
               {query ? (
                 <button
-                  onClick={() => setQuery("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-inkMuted hover:text-ink"
+                  type="button"
+                  onClick={() => {
+                    setQuery("");
+                    setPage(1);
+                  }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-inkSubtle transition hover:bg-surfaceMuted hover:text-ink"
                   aria-label="Clear search"
                 >
-                  <X size={15} />
+                  <X size={14} />
                 </button>
               ) : null}
             </div>
 
-            <div className="flex rounded-2xl border border-line bg-white/60 p-1 dark:bg-slate-950/50">
-              {directionTabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => {
-                    setDirection(tab.id);
-                    setPage(1);
-                  }}
-                  className={cn(
-                    "rounded-xl px-3.5 py-1.5 text-xs font-semibold transition",
-                    direction === tab.id
-                      ? "bg-ink text-white shadow-soft dark:bg-white dark:text-slate-950"
-                      : "text-inkMuted hover:text-ink dark:hover:text-white"
-                  )}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl
+              label="Transaction direction"
+              options={directionTabs}
+              value={direction}
+              onChange={(id) => {
+                setDirection(id);
+                setPage(1);
+              }}
+              className="h-10 items-center"
+            />
 
-            <button
+            <Button
+              variant={filtersOpen ? "primary" : "secondary"}
+              icon={SlidersHorizontal}
               onClick={() => setFiltersOpen((open) => !open)}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-2xl border border-line px-3.5 py-2.5 text-sm font-medium transition",
-                filtersOpen ? "bg-ink text-white dark:bg-white dark:text-slate-950" : "bg-white/60 hover:bg-white dark:bg-slate-950/50"
-              )}
+              aria-expanded={filtersOpen}
+              aria-controls="transaction-filters"
             >
-              <SlidersHorizontal size={16} />
               Filters
               {activeFilters > 0 ? (
-                <span className="grid h-5 min-w-[1.25rem] place-items-center rounded-full bg-brand-500 px-1 text-[10px] font-bold text-white">
+                <span
+                  className={cn(
+                    "grid h-4 min-w-[1rem] place-items-center rounded-pill px-1 text-[10px] font-bold leading-none",
+                    filtersOpen ? "bg-canvas text-ink" : "bg-aurum-400 text-aurum-950"
+                  )}
+                >
                   {activeFilters}
                 </span>
               ) : null}
-            </button>
+            </Button>
 
-            <button
-              onClick={() =>
-                addToast({
-                  title: "Export queued",
-                  body: `${filtered.length} transactions will be emailed as CSV.`,
-                  tone: "success"
-                })
-              }
-              className="inline-flex items-center gap-2 rounded-2xl border border-line bg-white/60 px-3.5 py-2.5 text-sm font-medium transition hover:bg-white dark:bg-slate-950/50"
-            >
-              <Download size={16} />
-              <span className="hidden sm:inline">Export</span>
-            </button>
+            <Button variant="secondary" icon={Download} loading={exporting} onClick={exportCsv}>
+              <span className="hidden sm:inline">Export CSV</span>
+            </Button>
           </div>
 
           {filtersOpen ? (
-            <div className="mt-4 grid animate-rise gap-3 sm:grid-cols-2 xl:grid-cols-5">
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-medium text-inkMuted">Category</span>
-                <select
+            <div
+              id="transaction-filters"
+              className="mt-4 grid animate-rise gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5"
+            >
+              <Field label="Category">
+                <Select
                   value={categoryId}
+                  aria-label="Filter by category"
                   onChange={(event) => {
                     setCategoryId(event.target.value as CategoryId | "all");
                     setPage(1);
                   }}
-                  className="w-full rounded-2xl border border-line bg-white/60 px-3 py-2.5 text-sm outline-none focus:border-accent-400 dark:bg-slate-950/50"
                 >
                   <option value="all">All categories</option>
                   {categories.map((category) => (
@@ -250,18 +336,17 @@ export function TransactionsPage() {
                       {category.label}
                     </option>
                   ))}
-                </select>
-              </label>
+                </Select>
+              </Field>
 
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-medium text-inkMuted">Account</span>
-                <select
+              <Field label="Account">
+                <Select
                   value={accountId}
+                  aria-label="Filter by account"
                   onChange={(event) => {
                     setAccountId(event.target.value);
                     setPage(1);
                   }}
-                  className="w-full rounded-2xl border border-line bg-white/60 px-3 py-2.5 text-sm outline-none focus:border-accent-400 dark:bg-slate-950/50"
                 >
                   <option value="all">All accounts</option>
                   {accounts.map((account) => (
@@ -269,168 +354,166 @@ export function TransactionsPage() {
                       {account.name}
                     </option>
                   ))}
-                </select>
-              </label>
+                </Select>
+              </Field>
 
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-medium text-inkMuted">Status</span>
-                <select
+              <Field label="Status">
+                <Select
                   value={status}
+                  aria-label="Filter by status"
+                  className="capitalize"
                   onChange={(event) => {
                     setStatus(event.target.value as TxStatus | "all");
                     setPage(1);
                   }}
-                  className="w-full rounded-2xl border border-line bg-white/60 px-3 py-2.5 text-sm capitalize outline-none focus:border-accent-400 dark:bg-slate-950/50"
                 >
                   {statusOptions.map((option) => (
                     <option key={option} value={option}>
                       {option === "all" ? "All statuses" : option}
                     </option>
                   ))}
-                </select>
-              </label>
+                </Select>
+              </Field>
 
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-medium text-inkMuted">From</span>
-                <select
+              <Field label="From">
+                <Select
                   value={fromMonth}
+                  aria-label="Range start month"
                   onChange={(event) => {
                     setFromMonth(event.target.value);
                     setPage(1);
                   }}
-                  className="w-full rounded-2xl border border-line bg-white/60 px-3 py-2.5 text-sm outline-none focus:border-accent-400 dark:bg-slate-950/50"
                 >
                   {months.map((month) => (
                     <option key={month.key} value={month.key}>
                       {month.label} 2026
                     </option>
                   ))}
-                </select>
-              </label>
+                </Select>
+              </Field>
 
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-medium text-inkMuted">To</span>
-                <select
+              <Field label="To">
+                <Select
                   value={toMonth}
+                  aria-label="Range end month"
                   onChange={(event) => {
                     setToMonth(event.target.value);
                     setPage(1);
                   }}
-                  className="w-full rounded-2xl border border-line bg-white/60 px-3 py-2.5 text-sm outline-none focus:border-accent-400 dark:bg-slate-950/50"
                 >
                   {months.map((month) => (
                     <option key={month.key} value={month.key}>
                       {month.label} 2026
                     </option>
                   ))}
-                </select>
-              </label>
+                </Select>
+              </Field>
             </div>
           ) : null}
 
           {activeFilters > 0 ? (
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <span className="text-xs text-inkMuted">
-                {filtered.length} of {transactions.length} transactions
+                <strong className="font-semibold text-ink">{filtered.length}</strong> of{" "}
+                {transactions.length} transactions
               </span>
-              <button
-                onClick={resetFilters}
-                className="inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-xs font-medium text-inkMuted transition hover:text-ink dark:hover:text-white"
-              >
-                <X size={12} /> Clear filters
-              </button>
+              <Button variant="ghost" size="sm" icon={X} onClick={resetFilters}>
+                Clear filters
+              </Button>
             </div>
           ) : null}
         </div>
 
-        {/* Horizontal scroll keeps the table intact on narrow screens. */}
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-sm">
+        {/* Desktop table */}
+        <div className="hidden overflow-x-auto md:block">
+          <table className="w-full min-w-[720px] text-left text-sm">
+            <caption className="sr-only">
+              Transactions, sorted by {sortKey} {sortDir === "asc" ? "ascending" : "descending"}
+            </caption>
             <thead>
-              <tr className="border-b border-line text-xs uppercase tracking-wider text-inkMuted">
-                <th className="px-5 py-3 font-semibold">
-                  <button
-                    onClick={() => toggleSort("date")}
-                    className="inline-flex items-center gap-1.5 transition hover:text-ink dark:hover:text-white"
-                  >
-                    Date <SortIcon column="date" />
-                  </button>
+              <tr className="border-b border-line bg-surfaceMuted/60 text-label font-semibold uppercase text-inkMuted">
+                <th scope="col" className="px-4 py-2.5">
+                  <SortButton column="date" label="Date" />
                 </th>
-                <th className="px-5 py-3 font-semibold">
-                  <button
-                    onClick={() => toggleSort("merchant")}
-                    className="inline-flex items-center gap-1.5 transition hover:text-ink dark:hover:text-white"
-                  >
-                    Merchant <SortIcon column="merchant" />
-                  </button>
+                <th scope="col" className="px-4 py-2.5">
+                  <SortButton column="merchant" label="Merchant" />
                 </th>
-                <th className="px-5 py-3 font-semibold">Category</th>
-                <th className="px-5 py-3 font-semibold">Account</th>
-                <th className="px-5 py-3 font-semibold">Status</th>
-                <th className="px-5 py-3 text-right font-semibold">
-                  <button
-                    onClick={() => toggleSort("amount")}
-                    className="inline-flex items-center gap-1.5 transition hover:text-ink dark:hover:text-white"
-                  >
-                    Amount <SortIcon column="amount" />
-                  </button>
+                <th scope="col" className="px-4 py-2.5">
+                  Category
+                </th>
+                <th scope="col" className="px-4 py-2.5">
+                  Account
+                </th>
+                <th scope="col" className="px-4 py-2.5">
+                  Status
+                </th>
+                <th scope="col" className="px-4 py-2.5 text-right">
+                  <SortButton column="amount" label="Amount" align="right" />
                 </th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 Array.from({ length: 8 }).map((_, index) => (
-                  <tr key={index} className="border-b border-line/60">
-                    <td colSpan={6} className="px-5 py-4">
+                  <tr key={index} className="border-b border-line last:border-0">
+                    <td colSpan={6} className={cellPad}>
                       <Skeleton className="h-6 w-full" />
                     </td>
                   </tr>
                 ))
               ) : pageRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-16 text-center">
-                    <p className="text-sm font-medium">No transactions match these filters</p>
-                    <button
-                      onClick={resetFilters}
-                      className="mt-3 rounded-2xl border border-line px-4 py-2 text-sm font-medium transition hover:bg-white/70 dark:hover:bg-white/5"
-                    >
-                      Clear filters
-                    </button>
+                  <td colSpan={6}>
+                    <EmptyState
+                      title="No transactions match these filters"
+                      description="Try widening the month range or clearing a filter."
+                      action={
+                        <Button variant="secondary" size="sm" icon={X} onClick={resetFilters}>
+                          Clear filters
+                        </Button>
+                      }
+                    />
                   </td>
                 </tr>
               ) : (
                 pageRows.map((tx) => {
                   const category = categoryMap[tx.categoryId];
+                  const account = accountMap[tx.accountId];
                   const signed = signedAmount(tx);
                   return (
                     <tr
                       key={tx.id}
-                      className="border-b border-line/60 transition last:border-0 hover:bg-white/60 dark:hover:bg-white/5"
+                      className="border-b border-line transition-colors duration-150 last:border-0 hover:bg-surfaceMuted"
                     >
-                      <td className="whitespace-nowrap px-5 py-4 text-inkMuted">
-                        {formatDate(tx.date)}
+                      <td className={cn(cellPad, "whitespace-nowrap text-inkMuted")}>
+                        {fmt.date(tx.date)}
                       </td>
-                      <td className="px-5 py-4">
-                        <p className="font-medium">{tx.merchant}</p>
-                        <p className="mt-0.5 text-xs text-inkMuted">{tx.memo}</p>
+                      <td className={cellPad}>
+                        <p className="font-medium text-ink">{tx.merchant}</p>
+                        {!compact ? (
+                          <p className="mt-0.5 max-w-[22rem] truncate text-xs text-inkMuted">
+                            {tx.memo}
+                          </p>
+                        ) : null}
                       </td>
-                      <td className="px-5 py-4">
+                      <td className={cellPad}>
                         <Pill color={category.color}>{category.label}</Pill>
                       </td>
-                      <td className="whitespace-nowrap px-5 py-4 text-inkMuted">
-                        {accountMap[tx.accountId].name}
-                        <span className="ml-1 text-xs">··{accountMap[tx.accountId].mask}</span>
+                      <td className={cn(cellPad, "whitespace-nowrap text-inkMuted")}>
+                        {account.name}
+                        <span className="ml-1 text-xs text-inkSubtle">··{account.mask}</span>
                       </td>
-                      <td className="px-5 py-4">
+                      <td className={cellPad}>
                         <StatusBadge status={tx.status} />
                       </td>
                       <td
                         className={cn(
-                          "whitespace-nowrap px-5 py-4 text-right font-semibold tabular-nums",
-                          signed >= 0 ? "text-brand-600 dark:text-brand-300" : "text-ink"
+                          cellPad,
+                          "numeric whitespace-nowrap text-right font-semibold",
+                          signed >= 0 ? "text-gain-600 dark:text-gain-400" : "text-ink"
                         )}
                       >
-                        {formatSigned(signed, 2)}
+                        {fmt.signed(signed, 2)}
                       </td>
                     </tr>
                   );
@@ -440,32 +523,109 @@ export function TransactionsPage() {
           </table>
         </div>
 
+        {/* Mobile: each row becomes its own card rather than a sideways scroll. */}
+        <div className="divide-y divide-line md:hidden">
+          {loading ? (
+            Array.from({ length: 6 }).map((_, index) => (
+              <div key={index} className="p-4">
+                <Skeleton className="h-14 w-full" />
+              </div>
+            ))
+          ) : pageRows.length === 0 ? (
+            <EmptyState
+              title="No transactions match these filters"
+              description="Try widening the month range or clearing a filter."
+              action={
+                <Button variant="secondary" size="sm" icon={X} onClick={resetFilters}>
+                  Clear filters
+                </Button>
+              }
+            />
+          ) : (
+            pageRows.map((tx) => {
+              const category = categoryMap[tx.categoryId];
+              const account = accountMap[tx.accountId];
+              const signed = signedAmount(tx);
+              return (
+                <article key={tx.id} className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-ink">{tx.merchant}</p>
+                      <p className="mt-0.5 truncate text-xs text-inkMuted">{tx.memo}</p>
+                    </div>
+                    <p
+                      className={cn(
+                        "numeric shrink-0 font-semibold",
+                        signed >= 0 ? "text-gain-600 dark:text-gain-400" : "text-ink"
+                      )}
+                    >
+                      {fmt.signed(signed, 2)}
+                    </p>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Pill color={category.color}>{category.label}</Pill>
+                    <StatusBadge status={tx.status} />
+                    <span className="text-xs text-inkMuted">{fmt.date(tx.date)}</span>
+                  </div>
+                  <p className="mt-2 text-xs text-inkSubtle">
+                    {account.name} ··{account.mask} · {tx.method}
+                  </p>
+                </article>
+              );
+            })
+          )}
+        </div>
+
+        {/* Pagination */}
         {!loading && filtered.length > 0 ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-4">
-            <p className="text-xs text-inkMuted">
-              Showing {(safePage - 1) * PAGE_SIZE + 1}–
-              {Math.min(safePage * PAGE_SIZE, filtered.length)} of {filtered.length}
-            </p>
-            <div className="flex items-center gap-2">
-              <button
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3">
+            <div className="flex items-center gap-3">
+              <p className="text-xs text-inkMuted">
+                {(safePage - 1) * pageSize + 1}–{Math.min(safePage * pageSize, filtered.length)} of{" "}
+                {filtered.length}
+              </p>
+              <label className="flex items-center gap-1.5 text-xs text-inkMuted">
+                <span className="hidden sm:inline">Rows</span>
+                <select
+                  value={pageSize}
+                  aria-label="Rows per page"
+                  onChange={(event) => {
+                    setPageSize(Number(event.target.value));
+                    setPage(1);
+                  }}
+                  className="rounded-control border border-line bg-surface px-2 py-1 text-xs outline-none transition focus:border-aurum-400"
+                >
+                  {pageSizes.map((size) => (
+                    <option key={size} value={size}>
+                      {size}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={ChevronLeft}
                 onClick={() => setPage((current) => Math.max(1, current - 1))}
                 disabled={safePage === 1}
-                className="grid h-9 w-9 place-items-center rounded-xl border border-line transition hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-white/5"
                 aria-label="Previous page"
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <span className="px-2 text-sm tabular-nums text-inkMuted">
+                className="w-8 px-0"
+              />
+              <span className="numeric px-2 text-sm text-inkMuted">
                 {safePage} / {pageCount}
               </span>
-              <button
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={ChevronRight}
                 onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
                 disabled={safePage === pageCount}
-                className="grid h-9 w-9 place-items-center rounded-xl border border-line transition hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-white/5"
                 aria-label="Next page"
-              >
-                <ChevronRight size={16} />
-              </button>
+                className="w-8 px-0"
+              />
             </div>
           </div>
         ) : null}

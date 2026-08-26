@@ -2,22 +2,50 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------------------------------------------------------------------------
+ * Theme tokens
+ *
+ * Light is the default declaration; `.dark` overrides only what changes. Every
+ * surface/text colour in the app resolves through these, so a component never
+ * needs a `dark:` variant just to stay legible.
+ * ------------------------------------------------------------------------ */
 :root {
-  --canvas: #f4f7fb;
-  --panel: rgba(255, 255, 255, 0.84);
-  --panel-muted: rgba(248, 250, 252, 0.9);
-  --line: rgba(148, 163, 184, 0.28);
-  --ink: #0f172a;
-  --ink-muted: #64748b;
+  --canvas: #f5f6f9;
+  --surface: #ffffff;
+  --surface-muted: #f0f2f6;
+  --surface-raised: #ffffff;
+  --line: #e3e7ee;
+  --line-strong: #cdd4e0;
+  --ink: #0f141c;
+  --ink-muted: #59647a;
+  --ink-subtle: #7c879b;
+
+  /* Accent tuned per theme so gold text keeps 4.5:1 on either background. */
+  --accent: #b57b1c;
+  --accent-soft: rgba(232, 179, 74, 0.14);
+  --gain: #13814f;
+  --loss: #dc2626;
+
+  --shadow-tint: rgba(9, 13, 20, 0.08);
 }
 
 .dark {
-  --canvas: #06101d;
-  --panel: rgba(10, 18, 32, 0.82);
-  --panel-muted: rgba(15, 23, 42, 0.9);
-  --line: rgba(100, 116, 139, 0.26);
-  --ink: #e8f0f8;
-  --ink-muted: #94a3b8;
+  --canvas: #070a10;
+  --surface: #111722;
+  --surface-muted: #0d131d;
+  --surface-raised: #161d2b;
+  --line: #212a3a;
+  --line-strong: #303c51;
+  --ink: #eef2f8;
+  --ink-muted: #97a3b8;
+  --ink-subtle: #7a8699;
+
+  --accent: #e8b34a;
+  --accent-soft: rgba(232, 179, 74, 0.12);
+  --gain: #43bd81;
+  --loss: #f87171;
+
+  --shadow-tint: rgba(0, 0, 0, 0.5);
 }
 
 * {
@@ -33,12 +61,11 @@ body {
   margin: 0;
   min-height: 100vh;
   background-color: var(--canvas);
-  background-attachment: fixed;
   color: var(--ink);
-}
-
-::selection {
-  background: rgba(31, 179, 106, 0.24);
+  /* Numbers are the point of this app: enable tabular figures globally. */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "cv11", "ss01";
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 a {
@@ -54,15 +81,74 @@ textarea {
   color: inherit;
 }
 
+::selection {
+  background: rgba(232, 179, 74, 0.28);
+}
+
 /* Keyboard focus stays visible; pointer focus does not draw a ring. */
 :focus-visible {
-  outline: 2px solid #40cb82;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
+  border-radius: 4px;
 }
 
 @layer components {
-  .glass-panel {
-    @apply border border-line bg-panel backdrop-blur-xl;
+  /* The single card treatment. Depth = 1px border + soft shadow, never both heavy. */
+  .panel {
+    @apply rounded-card border border-line bg-surface shadow-card;
+  }
+
+  /* Section label above a metric: small, tracked out, uppercase. */
+  .eyebrow {
+    @apply text-label font-semibold uppercase text-inkMuted;
+  }
+
+  /* Any figure the eye has to compare down a column. */
+  .numeric {
+    font-variant-numeric: tabular-nums;
+    @apply tracking-tight;
+  }
+
+  /* Shimmering skeleton — a moving highlight reads as "loading", not "broken". */
+  .skeleton {
+    @apply relative overflow-hidden bg-surfaceMuted;
+  }
+  .skeleton::after {
+    content: "";
+    @apply absolute inset-0 -translate-x-full animate-shimmer;
+    background-image: linear-gradient(
+      90deg,
+      transparent,
+      var(--shimmer-highlight, rgba(255, 255, 255, 0.55)),
+      transparent
+    );
+  }
+  .dark .skeleton::after {
+    --shimmer-highlight: rgba(255, 255, 255, 0.06);
+  }
+}
+
+@layer utilities {
+  /* Staggered section entrances. Applied by index so a page assembles top-down. */
+  .stagger-1 {
+    animation-delay: 60ms;
+  }
+  .stagger-2 {
+    animation-delay: 120ms;
+  }
+  .stagger-3 {
+    animation-delay: 180ms;
+  }
+  .stagger-4 {
+    animation-delay: 240ms;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 }
 
@@ -75,13 +161,19 @@ textarea {
 
 .overflow-y-auto::-webkit-scrollbar-thumb,
 .overflow-x-auto::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.4);
+  background: var(--line-strong);
   border-radius: 9999px;
 }
 
 .overflow-y-auto::-webkit-scrollbar-track,
 .overflow-x-auto::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* Recharts injects focus outlines on its SVG wrappers; we manage focus ourselves. */
+.recharts-wrapper:focus,
+.recharts-surface:focus {
+  outline: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

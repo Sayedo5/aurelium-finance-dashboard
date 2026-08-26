@@ -1,17 +1,30 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CreditCard, Landmark, PiggyBank, ShieldCheck, type LucideIcon } from "lucide-react";
-import { Card } from "@/components/ui/card";
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  CreditCard,
+  Download,
+  Landmark,
+  PiggyBank,
+  ShieldCheck,
+  type LucideIcon
+} from "lucide-react";
+import { Card, CardHeader } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatCard } from "@/components/ui/stat-card";
 import { StatusBadge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/states";
+import { useAppContext, useFormat } from "@/components/providers/app-provider";
 import { useSimulatedLoading } from "@/lib/hooks";
 import { accounts, categoryMap, transactions } from "@/lib/mock-data";
 import { creditOutstanding, netWorth, signedAmount, totalBalance } from "@/lib/selectors";
-import { cn, formatCurrency, formatDate, formatSigned } from "@/lib/utils";
-import type { AccountKind } from "@/lib/types";
+import { csvFilename, downloadCsv, toCsv } from "@/lib/csv";
+import { cn, ratioToPercent } from "@/lib/utils";
+import type { AccountKind, Transaction } from "@/lib/types";
 
 const kindIcon: Record<AccountKind, LucideIcon> = {
   checking: Landmark,
@@ -27,82 +40,168 @@ const kindLabel: Record<AccountKind, string> = {
   credit: "Credit card"
 };
 
-export function AccountsPage() {
-  const loading = useSimulatedLoading();
-  const [selectedId, setSelectedId] = useState(accounts[0].id);
+const ACTIVITY_LIMIT = 8;
 
+export function AccountsPage() {
+  const { refreshKey, addToast } = useAppContext();
+  const loading = useSimulatedLoading(600, refreshKey);
+  const fmt = useFormat();
+
+  const [selectedId, setSelectedId] = useState(accounts[0].id);
   const selected = accounts.find((account) => account.id === selectedId) ?? accounts[0];
 
-  const accountActivity = useMemo(
-    () => transactions.filter((tx) => tx.accountId === selected.id).slice(0, 8),
+  /** Every transaction on the selected account, newest first. */
+  const accountLedger = useMemo(
+    () => transactions.filter((tx) => tx.accountId === selected.id),
     [selected.id]
   );
 
+  const accountActivity = accountLedger.slice(0, ACTIVITY_LIMIT);
+
   const monthFlow = useMemo(() => {
-    const rows = transactions.filter(
-      (tx) => tx.accountId === selected.id && tx.date.startsWith("2026-07") && tx.status !== "failed"
-    );
-    const inflow = rows.filter((tx) => tx.direction === "income").reduce((sum, tx) => sum + tx.amount, 0);
-    const outflow = rows.filter((tx) => tx.direction === "expense").reduce((sum, tx) => sum + tx.amount, 0);
+    let inflow = 0;
+    let outflow = 0;
+    for (const tx of accountLedger) {
+      if (!tx.date.startsWith("2026-07") || tx.status === "failed") continue;
+      if (tx.direction === "income") inflow += tx.amount;
+      else outflow += tx.amount;
+    }
     return { inflow, outflow };
-  }, [selected.id]);
+  }, [accountLedger]);
+
+  function exportStatement() {
+    if (accountLedger.length === 0) {
+      addToast({
+        title: "Nothing to export",
+        body: `${selected.name} has no recorded activity.`,
+        tone: "warning"
+      });
+      return;
+    }
+
+    const csv = toCsv<Transaction>(accountLedger, [
+      { header: "Date", value: (tx) => tx.date },
+      { header: "Merchant", value: (tx) => tx.merchant },
+      { header: "Memo", value: (tx) => tx.memo },
+      { header: "Category", value: (tx) => categoryMap[tx.categoryId].label },
+      { header: "Method", value: (tx) => tx.method },
+      { header: "Status", value: (tx) => tx.status },
+      { header: "Amount (USD)", value: (tx) => signedAmount(tx).toFixed(2) }
+    ]);
+
+    const ok = downloadCsv(csvFilename("statement", selected.mask), csv);
+    addToast(
+      ok
+        ? {
+            title: "Statement downloaded",
+            body: `${accountLedger.length} rows from ${selected.name}.`,
+            tone: "success"
+          }
+        : {
+            title: "Export blocked",
+            body: "Your browser prevented the download. Check its download settings.",
+            tone: "error"
+          }
+    );
+  }
 
   return (
     <>
-      <section className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="Cash on hand" value={totalBalance} icon={Landmark} caption="checking, savings, reserve" loading={loading} />
-        <StatCard label="Credit outstanding" value={creditOutstanding} icon={CreditCard} caption="due 15 Aug" loading={loading} />
-        <StatCard label="Net position" value={netWorth} icon={PiggyBank} delta={3.8} caption="vs. June" loading={loading} />
+      <section aria-label="Position summary" className="grid animate-rise gap-4 sm:grid-cols-3">
+        <StatCard
+          label="Cash on hand"
+          value={totalBalance}
+          icon={Landmark}
+          caption="checking, savings, reserve"
+          loading={loading}
+        />
+        <StatCard
+          label="Credit outstanding"
+          value={creditOutstanding}
+          icon={CreditCard}
+          caption="statement due 15 Aug"
+          loading={loading}
+          tone="loss"
+        />
+        <StatCard
+          label="Net position"
+          value={netWorth}
+          icon={PiggyBank}
+          delta={3.8}
+          caption="vs. June"
+          loading={loading}
+        />
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+      <section
+        aria-label="Accounts"
+        className="grid animate-rise gap-4 stagger-1 sm:grid-cols-2 xl:grid-cols-4"
+      >
         {loading
-          ? Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-52 w-full" />)
+          ? Array.from({ length: 4 }).map((_, index) => (
+              <Skeleton key={index} className="h-48 w-full rounded-card" />
+            ))
           : accounts.map((account) => {
               const Icon = kindIcon[account.kind];
               const active = account.id === selectedId;
               const utilisation =
-                account.limit !== undefined ? (account.balance / account.limit) * 100 : undefined;
+                account.limit !== undefined ? ratioToPercent(account.balance, account.limit) : undefined;
 
               return (
                 <button
                   key={account.id}
+                  type="button"
                   onClick={() => setSelectedId(account.id)}
+                  aria-pressed={active}
                   className={cn(
-                    "group rounded-[28px] border p-5 text-left shadow-soft backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:shadow-luxe",
+                    "panel p-5 text-left transition duration-200 ease-smooth",
+                    "hover:-translate-y-0.5 hover:shadow-lift",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-aurum-400 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas",
                     active
-                      ? "border-brand-400 bg-gradient-to-br from-brand-500/15 to-accent-500/10 ring-2 ring-brand-400/40"
-                      : "border-line bg-white/70 dark:bg-slate-950/60"
+                      ? "border-aurum-400/60 shadow-lift ring-1 ring-aurum-400/40"
+                      : "hover:border-lineStrong"
                   )}
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <span className="grid h-11 w-11 place-items-center rounded-2xl border border-line bg-white/70 text-brand-600 dark:bg-slate-950/60 dark:text-brand-300">
-                      <Icon size={19} />
+                    <span
+                      className={cn(
+                        "grid h-10 w-10 place-items-center rounded-control border border-line transition-colors",
+                        active
+                          ? "bg-aurum-400/12 text-aurum-600 dark:text-aurum-400"
+                          : "bg-surfaceMuted text-inkMuted"
+                      )}
+                    >
+                      <Icon size={18} aria-hidden />
                     </span>
-                    <span className="rounded-full border border-line px-2.5 py-1 text-[11px] font-medium text-inkMuted">
+                    <span className="rounded-pill border border-line px-2.5 py-1 text-[11px] font-medium text-inkMuted">
                       {kindLabel[account.kind]}
                     </span>
                   </div>
 
-                  <p className="mt-4 truncate text-sm font-semibold">{account.name}</p>
+                  <p className="mt-4 truncate text-sm font-semibold text-ink">{account.name}</p>
                   <p className="truncate text-xs text-inkMuted">
                     {account.institution} ··{account.mask}
                   </p>
 
-                  <p className="mt-3 text-2xl font-semibold tabular-nums tracking-tight">
-                    {formatCurrency(account.balance, 2)}
+                  <p className="numeric mt-3 text-2xl font-semibold">
+                    {fmt.money(account.balance, 2)}
                   </p>
 
                   {utilisation !== undefined ? (
                     <>
-                      <Progress value={utilisation} color="#f59e0b" className="mt-3 h-2" />
+                      <Progress
+                        value={utilisation}
+                        color="#e8b34a"
+                        className="mt-3"
+                        label={`${account.name} credit utilisation`}
+                      />
                       <p className="mt-2 text-xs text-inkMuted">
-                        {utilisation.toFixed(0)}% of {formatCurrency(account.limit ?? 0)} limit
+                        {utilisation.toFixed(0)}% of {fmt.money(account.limit ?? 0)} limit
                       </p>
                     </>
                   ) : (
                     <p className="mt-3 text-xs text-inkMuted">
-                      {formatCurrency(account.available, 2)} available
+                      {fmt.money(account.available, 2)} available
                     </p>
                   )}
                 </button>
@@ -110,39 +209,43 @@ export function AccountsPage() {
             })}
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr),minmax(0,1fr)]">
+      <section className="grid animate-rise gap-4 stagger-2 xl:grid-cols-[minmax(0,1.5fr),minmax(0,1fr)]">
         <Card>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold">{selected.name}</h2>
-              <p className="text-sm text-inkMuted">Recent activity on this account</p>
-            </div>
-            <span className="rounded-full border border-line px-3 py-1 text-xs font-medium text-inkMuted">
-              ··{selected.mask}
-            </span>
-          </div>
+          <CardHeader
+            title={selected.name}
+            description={`Most recent ${Math.min(ACTIVITY_LIMIT, accountLedger.length)} of ${accountLedger.length} entries`}
+            actions={
+              <Button variant="secondary" size="sm" icon={Download} onClick={exportStatement}>
+                Statement
+              </Button>
+            }
+          />
 
-          <div className="mt-4 space-y-1">
+          <ul className="mt-4 space-y-0.5">
             {accountActivity.length === 0 ? (
-              <p className="py-10 text-center text-sm text-inkMuted">
-                No activity recorded on this account yet.
-              </p>
+              <li>
+                <EmptyState
+                  title="No activity on this account"
+                  description="Transactions posted to this account will appear here."
+                />
+              </li>
             ) : (
               accountActivity.map((tx) => {
                 const signed = signedAmount(tx);
                 return (
-                  <div
+                  <li
                     key={tx.id}
-                    className="flex items-center gap-3 rounded-2xl px-2 py-3 transition hover:bg-white/70 dark:hover:bg-white/5"
+                    className="flex items-center gap-3 rounded-control px-2 py-2.5 transition-colors duration-150 hover:bg-surfaceMuted"
                   >
                     <span
-                      className="h-9 w-1 shrink-0 rounded-full"
+                      aria-hidden
+                      className="h-8 w-1 shrink-0 rounded-pill"
                       style={{ backgroundColor: categoryMap[tx.categoryId].color }}
                     />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{tx.merchant}</p>
+                      <p className="truncate text-sm font-medium text-ink">{tx.merchant}</p>
                       <p className="truncate text-xs text-inkMuted">
-                        {formatDate(tx.date)} · {tx.method}
+                        {fmt.date(tx.date)} · {tx.method}
                       </p>
                     </div>
                     <div className="hidden sm:block">
@@ -150,70 +253,65 @@ export function AccountsPage() {
                     </div>
                     <p
                       className={cn(
-                        "shrink-0 text-sm font-semibold tabular-nums",
-                        signed >= 0 ? "text-brand-600 dark:text-brand-300" : "text-ink"
+                        "numeric shrink-0 text-sm font-semibold",
+                        signed >= 0 ? "text-gain-600 dark:text-gain-400" : "text-ink"
                       )}
                     >
-                      {formatSigned(signed, 2)}
+                      {fmt.signed(signed, 2)}
                     </p>
-                  </div>
+                  </li>
                 );
               })
             )}
-          </div>
+          </ul>
         </Card>
 
         <div className="space-y-4">
           <Card>
-            <h2 className="text-base font-semibold">July flow</h2>
-            <p className="text-sm text-inkMuted">Money in and out of {selected.name}</p>
-            <dl className="mt-4 space-y-3">
-              <div className="flex items-center justify-between rounded-2xl border border-line px-4 py-3">
-                <dt className="text-sm text-inkMuted">Inflow</dt>
-                <dd className="font-semibold tabular-nums text-brand-600 dark:text-brand-300">
-                  {formatCurrency(monthFlow.inflow)}
+            <CardHeader title="July flow" description={`Money in and out of ${selected.name}`} />
+            <dl className="mt-4 space-y-2.5">
+              <div className="flex items-center justify-between gap-3 rounded-control border border-line px-4 py-3">
+                <dt className="flex items-center gap-2 text-sm text-inkMuted">
+                  <ArrowDownLeft size={15} className="text-gain-600 dark:text-gain-400" aria-hidden />
+                  Inflow
+                </dt>
+                <dd className="numeric font-semibold text-gain-600 dark:text-gain-400">
+                  {fmt.money(monthFlow.inflow)}
                 </dd>
               </div>
-              <div className="flex items-center justify-between rounded-2xl border border-line px-4 py-3">
-                <dt className="text-sm text-inkMuted">Outflow</dt>
-                <dd className="font-semibold tabular-nums text-rose-600 dark:text-rose-400">
-                  {formatCurrency(monthFlow.outflow)}
+              <div className="flex items-center justify-between gap-3 rounded-control border border-line px-4 py-3">
+                <dt className="flex items-center gap-2 text-sm text-inkMuted">
+                  <ArrowUpRight size={15} className="text-loss-600 dark:text-loss-400" aria-hidden />
+                  Outflow
+                </dt>
+                <dd className="numeric font-semibold text-loss-600 dark:text-loss-400">
+                  {fmt.money(monthFlow.outflow)}
                 </dd>
               </div>
-              <div className="flex items-center justify-between rounded-2xl bg-ink px-4 py-3 text-white dark:bg-white dark:text-slate-950">
-                <dt className="text-sm">Net</dt>
-                <dd className="font-semibold tabular-nums">
-                  {formatSigned(monthFlow.inflow - monthFlow.outflow)}
+              <div className="flex items-center justify-between gap-3 rounded-control bg-surfaceMuted px-4 py-3 ring-1 ring-line">
+                <dt className="text-sm font-medium text-ink">Net</dt>
+                <dd className="numeric font-semibold text-ink">
+                  {fmt.signed(monthFlow.inflow - monthFlow.outflow)}
                 </dd>
               </div>
             </dl>
           </Card>
 
           <Card>
-            <h2 className="text-base font-semibold">Account details</h2>
-            <dl className="mt-4 space-y-3 text-sm">
-              <div className="flex justify-between gap-4">
-                <dt className="text-inkMuted">Institution</dt>
-                <dd className="text-right font-medium">{selected.institution}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-inkMuted">Type</dt>
-                <dd className="text-right font-medium">{kindLabel[selected.kind]}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-inkMuted">Available</dt>
-                <dd className="text-right font-medium tabular-nums">
-                  {formatCurrency(selected.available, 2)}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-inkMuted">Opened</dt>
-                <dd className="text-right font-medium">{formatDate(selected.openedOn)}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-inkMuted">Currency</dt>
-                <dd className="text-right font-medium">{selected.currency}</dd>
-              </div>
+            <CardHeader title="Account details" />
+            <dl className="mt-4 space-y-2.5 text-sm">
+              {[
+                { term: "Institution", detail: selected.institution },
+                { term: "Type", detail: kindLabel[selected.kind] },
+                { term: "Available", detail: fmt.money(selected.available, 2) },
+                { term: "Opened", detail: fmt.date(selected.openedOn) },
+                { term: "Currency", detail: selected.currency }
+              ].map((row) => (
+                <div key={row.term} className="flex justify-between gap-4">
+                  <dt className="text-inkMuted">{row.term}</dt>
+                  <dd className="text-right font-medium text-ink">{row.detail}</dd>
+                </div>
+              ))}
             </dl>
           </Card>
         </div>
